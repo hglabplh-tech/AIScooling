@@ -29,7 +29,7 @@ def inputPrompt(prompt, index):
 
 if __name__ == '__main__':
     index = 0
-    vector_db  = load_vector_db()
+    vector_db  = load_vector_db(False)
 
     query = inputPrompt('Prompt', index)
     while  query != 'exit':

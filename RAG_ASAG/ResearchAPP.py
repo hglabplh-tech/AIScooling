@@ -21,7 +21,7 @@ def process_query(vector_db, context, query):
 
 
 if __name__ == '__main__':
-    vector_db = load_vector_db()
+    vector_db = load_vector_db(False)
     context = input("Context: >")
     query = input("Ask me: > ")
     while query != 'exit':

@@ -40,10 +40,11 @@ def get_bert_model_scoring(question, student_answer, reference_answer):
     base = 0.70
     vectorizer = TfidfVectorizer()
     # Example usage for inference
-    tfidf = vectorizer.fit_transform([question, student_answer, reference_answer])
     tokenizer, model = get_BERT_PreReq()
     inputs = prepare_input(question, reference_answer, student_answer,tokenizer, model)
     outputs = model(**inputs)
+    model.fit
+    outputs.logits = outputs.logits.ite
     predicted_score = outputs.logits.item()
     print(f"BERT Score: {predicted_score:.4f}")
     fin_score = abs(((predicted_score - base) / (1 - base)/ 10))

@@ -20,6 +20,8 @@ from langchain_ollama import OllamaEmbeddings
 from langchain_classic.chains import LLMChain, SimpleSequentialChain
 from langchain_classic.chains import RetrievalQA
 from langchain_core.output_parsers import StrOutputParser
+from openai import OpenAI
+import pandas as pd
 
 CSIZE_CONST = 1024
 
@@ -80,6 +82,27 @@ def extract_doc_from_pdf(file_path):
     print(f'Number of pages: {page_count}')
     # getting a specific page from the pdf file
     return documents
+
+def analyze_CSV(csv_file_path, query,parent):
+    if parent:
+        api_key = get_app_key_in_parent()
+    else:
+        api_key = get_app_key()
+    client = OpenAI(api_key=api_key)
+
+# Load CSV data
+    df = pd.read_csv(csv_file_path)
+    csv_string = df.to_string()
+
+# Send to OpenAI
+    response = client.chat.completions.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "You are a data researcher."},
+            {"role": "user", "content": f"where criteria is   {query}  in this data\n{csv_string}"}
+        ]
+        )
+    return response.choices[0].message.content
 
 
 def read_lines(file_path):
@@ -218,12 +241,18 @@ def add_documents(complete_content, db_path, parent):
 
 
 def get_db_base_path():
-    home = Path.home()
-    db_base_path = os.path.join(home, 'sklearn_vectordb')
+    base = Path.home()
+    db_base_path = os.path.join(base, 'sklearn_vectordb')
     if not os.path.exists(db_base_path):
         os.makedirs(db_base_path)
     return db_base_path
 
+def  get_model_path():
+    model_path = os.path.join(get_db_base_path(), "sklearn_model")
+    if not os.path.exists(model_path):
+        os.makedirs(model_path)
+    model_path = os.path.join(model_path, "sklearn_trained_model.bin")
+    return model_path
 
 def get_rag_config_path():
     home = Path.home()
@@ -282,8 +311,8 @@ def set_api_env_and_keys_in_parent():
     return
 
 
-def get_vector_db(db_path):
-    embeddings = get_embedding('openai', False)
+def get_vector_db(db_path, parent):
+    embeddings = get_embedding('openai', parent)
     #embeddings = DeterministicFakeEmbedding(size=4096)
     #embeddings = DeterministicFakeEmbedding(size=1024)
     #embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
@@ -293,10 +322,16 @@ def get_vector_db(db_path):
     return vector_db
 
 
-def load_vector_db():
-    db_to_use = input("DB to use -> comp-science/history/literature/temp : ")
+def load_vector_db(parent):
+    if parent:
+        get_app_key_in_parent()
+        get_hugg_key_in_parent()
+    else:
+        get_app_key()
+        get_hugg_key()
+    db_to_use = input("DB to use -> compscience/history/literature/temp : ")
     db_path = ''
-    if db_to_use == 'comp-science':
+    if db_to_use == 'compscience':
         db_path = get_db_inf_path()
     elif db_to_use == 'history':
         db_path = get_db_history_path()
@@ -304,7 +339,7 @@ def load_vector_db():
         db_path = get_db_lit_path()
     else:
         db_path = get_db_temp_path()
-    return get_vector_db(db_path)
+    return get_vector_db(db_path, parent=parent)
 
 
 def generate_follow_ups(vector_db, original_query, context, generated_answer):
@@ -327,6 +362,7 @@ def generate_follow_ups(vector_db, original_query, context, generated_answer):
         "context": context,
         "answer": generated_answer
     })
+    vector_db.get_all_documents()
     query = raw_query.to_string()
     result = vector_db.similarity_search(query, k=3)
     answer = vector_db.similarity_search_with_score(query, k=3)
@@ -348,7 +384,6 @@ def query_execute(vector_db, query):
     relevance = vector_db.similarity_search_with_relevance_scores(query, k=3)
 
     retriever = get_as_retriever(vector_db)
-
     q_result = retriever.invoke(query)
 
     print(f"Finish query at: {actual_time()}")
@@ -382,6 +417,13 @@ def printout_retrieved_docs(q_result):
     print(f"Retrieved Result: {q_result}")
 
 if __name__ == "__main__":
-    print('>>Start>>>')
-    result = extract_csv_data("test.csv")
-    print(result)
+    vector_db = load_vector_db(True)
+    query = input("give query or exit: ")
+    while query != "exit":
+        answer, result, relevance, q_result = query_execute(vector_db, query)
+        if "link" in query:
+            response = analyze_CSV("youtube_index.csv", query, True)
+            print(response)
+            q_result = q_result.append(response)
+            printout_results(answer, result, relevance, q_result)
+        query = input("give query or exit: ")

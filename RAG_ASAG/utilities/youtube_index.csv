@@ -1,7 +1,10 @@
-topic,author,date,link
-markov chain,,,https://www.youtube.com/shorts/1IJlIoGmpxo
-markov chain weather,,,https://www.youtube.com/shorts/0y_kIjB9ydI
-monte carlo markov chains,,,https://www.youtube.com/shorts/vyGQNpToVJM
-markov chain definition,,,https://www.youtube.com/shorts/zU88KjZpxsE
-markov chain music,,,https://www.youtube.com/shorts/ysmuiTiJUo0
-markov chain mathematical,,,https://www.youtube.com/shorts/BjmZNMCuKNY
+id,criteria,author,link
+1,markov chain,Unknown,https://www.youtube.com/shorts/1IJlIoGmpxo
+2,markov chain weather,Unknown,https://www.youtube.com/shorts/0y_kIjB9ydI
+3,monte carlo markov chains,Unknown,https://www.youtube.com/shorts/vyGQNpToVJM
+4,markov chain definition,Unknown,https://www.youtube.com/shorts/zU88KjZpxsE
+5,markov chain music,Unknown,https://www.youtube.com/shorts/ysmuiTiJUo0
+6,markov chain mathematical,Unknown,https://www.youtube.com/shorts/BjmZNMCuKNY
+7,"LISP , and the Beginning of AI",YouCanBuildTech,https://www.youtube.com/shorts/HMOPQisZnBY
+8,Scheme functional programming and object oriented programming smalltalk,Mike Sperber,https://www.youtube.com/watch?v=1ISYi90G-mY
+9,deep learning with tensorflow,Mike Sperber,https://www.youtube.com/watch?v=y-McNDBbS7M

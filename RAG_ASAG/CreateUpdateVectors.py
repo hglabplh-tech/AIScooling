@@ -25,7 +25,7 @@ from langchain_ollama import OllamaEmbeddings
 
 
 from utilities.RAGUtils import build_vectors, get_db_lit_path, get_db_inf_path, get_db_history_path, actual_time
-from utilities.RAGUtils import CHUNK_SIZE, add_documents, read_all_docs, read_lines
+from utilities.RAGUtils import CHUNK_SIZE, add_documents, read_all_docs, get_db_base_path
 
 def get_embedding(key: str):
     if key == 'openai':
@@ -83,6 +83,7 @@ if __name__ == '__main__':
 
     mode = input("Select mode create / createhist / createlit / add / addhist/ addlit / update(**later**): ")
     print(f"start collecting pdf datas at {actual_time()}....")
+    print(get_db_base_path())
     if mode == 'create':
         ret_code, complete_content = read_all_docs(
             ['compscience'])
