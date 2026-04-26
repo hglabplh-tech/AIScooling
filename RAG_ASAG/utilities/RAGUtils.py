@@ -248,11 +248,11 @@ def get_db_base_path():
     return db_base_path
 
 def  get_model_path():
-    model_path = os.path.join(get_db_base_path(), "sklearn_model")
-    if not os.path.exists(model_path):
-        os.makedirs(model_path)
-    model_path = os.path.join(model_path, "sklearn_trained_model.bin")
-    return model_path
+    base_model_path = os.path.join(get_db_base_path(), "sklearn_model")
+    if not os.path.exists(base_model_path):
+        os.makedirs(base_model_path)
+    absolute_model_path = os.path.join(base_model_path, "sklearn_trained_model.pt")
+    return absolute_model_path, base_model_path
 
 def get_rag_config_path():
     home = Path.home()

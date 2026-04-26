@@ -14,16 +14,22 @@ import torch
 import torch.nn as nn
 
 # Most of the examples have typing on the signatures for readability
-from typing import Optional, Callable, List, Tuple
+from typing import Optional, Callable, List, Tuple, Any
 from copy import deepcopy
+
+from torch.nn import CrossEntropyLoss, DataParallel
+from torch.optim import AdamW
 # For data loading
-from torch.utils.data import Dataset, IterableDataset, TensorDataset, DataLoader
+from torch.utils.data import Dataset, IterableDataset, TensorDataset, DataLoader, dataloader
 from torch.nn.utils.rnn import pad_sequence
 import json
 import glob
 import gzip
 import bz2
 # import wandb
+
+
+from utilities.RAGUtils import get_model_path
 
 import matplotlib.pyplot as plt
 
@@ -409,6 +415,13 @@ class BERT(nn.Module):
 We can verify that the model is working by running a quick test.
 '''
 
+def create_data_to_train(question, answer):
+    question = question.lower().strip()
+    answer = answer.lower().strip()
+    result = []
+    result.append(question)
+    result.append(answer)
+    return result
 
 def check_work(tokenizer):
     sentence = "The quick brown fox jumps over the lazy dog."
@@ -476,6 +489,27 @@ def workflow_test():
     #print(dataset[0])
     return dataset
 
+def do_train_with_dataset(model_path, tokenizer, bert_model, question, answer, num_epochs):
+    data = create_data_to_train(question, answer)
+    dataset = MLMDataset(tokenizer, data)
+    dataset.tokenize()
+    # get the first item
+    input_ids, labels = dataset[0]
+    print('input_ids:', input_ids)
+    print('labels:', labels)
+    # %%
+    ## tet with one sentence
+    print(dataset[0])
+    dataloader, device, device_ids, loss_fn, optimizer, losses, num_epochs = process_dataset(bert_model, dataset, num_epochs)
+    make_mod_visible_and_train(bert_model, dataloader, num_epochs, device, optimizer,
+                     losses, loss_fn, device_ids)
+    save_model(bert_model, model_path, device_ids)
+    print(f"Model saved to '{model_path}'")
+
+
+    return dataset
+
+
 def noise_inputs(inputs, mask_token_id, mlm_probability=0.15):
     inputs = deepcopy(inputs)
     labels = [-100] * len(inputs)
@@ -497,7 +531,7 @@ def collate_fn(batch: List[Tuple[List[int], List[int]]]):
     return padded_input_ids, attention_mask, padded_labels
 
 
-def process_dataset(dataset):
+def process_dataset(bert_model, dataset, num_epochs):
     batch_size = 20
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False,  collate_fn=collate_fn)
 
@@ -513,7 +547,39 @@ def process_dataset(dataset):
     '''
     Now, lets put it all together in the training loop.
     '''
-    device_ids =  None
+    device, device_ids = detect_device()
+
+
+    return initialize_for_train(bert_model, dataloader, device, device_ids, num_epochs=num_epochs)
+
+
+def initialize_for_train(bert_model: BERT, dataloader: DataLoader[Any], device: str, device_ids, num_epochs) -> tuple[
+    DataLoader[Any], str, Any | None, BERT | DataParallel[BERT], CrossEntropyLoss, AdamW, int, list[Any]]:
+    if device_ids is not None:
+        bert_model = nn.DataParallel(bert_model, device_ids=device_ids)
+
+    loss_fn = nn.CrossEntropyLoss()
+
+    learning_rate = 4e-5
+    optimizer = torch.optim.AdamW(bert_model.parameters(), lr=learning_rate)
+
+    batch_size = 32
+
+    losses = []
+    return dataloader, device, device_ids, loss_fn, optimizer, losses, num_epochs
+
+
+def get_model_instance(device: str) -> BERT:
+    bert_model = BERT(vocab_size=tokenizer.get_vocab_size(),
+                      hidden_size=768,
+                      num_heads=12,
+                      num_layers=6,
+                      mode="mlm").to(device)
+    return bert_model
+
+
+def detect_device() -> tuple[str, Any]:
+    device_ids = None
     device = 'cpu'
     if torch.backends.mps.is_available():
         device = 'mps'
@@ -529,34 +595,16 @@ def process_dataset(dataset):
             print("Using 1 GPU")
 
     print(f"Device: '{device}'")
-
-    bert_model = BERT(vocab_size=tokenizer.get_vocab_size(),
-                      hidden_size=768,
-                      num_heads=12,
-                      num_layers=6,
-                      mode="mlm").to(device)
-
-    if device_ids is not None:
-        bert_model = nn.DataParallel(bert_model, device_ids=device_ids)
-
-    loss_fn = nn.CrossEntropyLoss()
-
-    learning_rate = 4e-5
-    optimizer = torch.optim.AdamW(bert_model.parameters(), lr=learning_rate)
-
-    batch_size = 32
-    num_epochs = 3
-
-    losses = []
-    return  dataloader, device ,device_ids, bert_model, loss_fn, optimizer, num_epochs, losses
+    return device, device_ids
 
 
 # %%
 
 
 
-def make_mod_visible_and_train(dataloader, num_epochs, device, optimizer,
+def make_mod_visible_and_train(bert_model, dataloader, num_epochs, device, optimizer,
                      losses, loss_fn, device_ids):
+    print(f"Parameter device {device}")
     for epoch in trange(num_epochs, desc="Epoch"):
         for step, (input_ids, attention_mask, labels) in enumerate(
                 tqdm(dataloader, position=1, leave=True, desc="Step")):
@@ -575,12 +623,12 @@ def make_mod_visible_and_train(dataloader, num_epochs, device, optimizer,
             losses.append(loss.item())
             # wandb.log({"loss": loss.item()})
 
+        _, base_model_path =  get_model_path()
+        save_path =  os.path.join(base_model_path,  "bert_epoch_"  + str(epoch) + ".pt")
         if device_ids is not None:
-
-            torch.save(bert_model.module.state_dict(), f"bert_epoch_{epoch}.pt")
+            torch.save(bert_model.module.state_dict(), save_path)
         else:
-
-            torch.save(bert_model.state_dict(), f"bert_epoch_{epoch}.pt")
+            torch.save(bert_model.state_dict(), save_path)
 
 
 
@@ -591,6 +639,23 @@ def save_model(bert_model,  model_path, device_ids):
         torch.save(bert_model.module, model_path)
     else:
         torch.save(bert_model, model_path)
+
+def load_model_and_train(model_path, question, answer, num_epochs=20): #, device_ids):
+    #if device_ids is not None:
+    #    loaded_bert = bert_model.module.load_state_dict(torch.load(model_path, weights_only=False, map_location=device_ids))
+    tokenizer  = get_bert_pre_req()
+    device, device_ids = detect_device()
+    if os.path.exists(model_path):
+        print(f"Loading model from {model_path} with device {device}")
+        loaded_bert = torch.load(model_path,  weights_only=False)
+        loaded_bert  = loaded_bert.to(device)
+    else:
+        print(f"Get model instance  with device {device}")
+        loaded_bert  = get_model_instance(device)
+    do_train_with_dataset(model_path, tokenizer, loaded_bert, question, answer,  num_epochs)
+    return loaded_bert, device, device_ids
+
+
 '''
 Now that we have trained the model, we can use it to predict the masked tokens.
 '''
@@ -605,13 +670,12 @@ if  __name__ == "__main__":
     q_emb, multihead_q_emb = do_weighted_output(v_emb, attn)
     print(multihead_q_emb)
     tokens, token_ids, bert_model, attn = check_work(tokenizer)
-    dataset  = workflow_test()
-    ataloader, device, device_ids, bert_model, loss_fn, optimizer, num_epochs, losses = process_dataset(dataset)
-    make_mod_visible_and_train(ataloader, 10, device, optimizer,
-                     losses, loss_fn, device_ids)
+    question = "How are you"
+    answer =  " Normally I am fine but I try to  solve many problems "
+    model_path, _ = get_model_path()
+    bert_model, device, device_ids  = load_model_and_train(model_path, question, answer)
     s = 'I really like the book it was great and I loved reading it.'
     noise_and_predict_tokens(s, tokenizer, bert_model)
-    model_path = "bert_pretrained.pt"
     save_model(bert_model, model_path, device_ids)
     print(f"Model saved to '{model_path}'")
     bert_model = torch.load(model_path, weights_only=False)

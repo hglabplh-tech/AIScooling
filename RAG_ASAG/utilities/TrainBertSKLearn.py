@@ -85,10 +85,7 @@ def train_untrained_model(vector_db, query,model_path):
 
 if  __name__ == '__main__':
     base_path = get_db_base_path()
-    model_path= os.path.join(base_path, get_model_path())
-    vector_db = load_vector_db(True)
     prompt  = input("Prompt: ")
     while prompt !='exit':
        # create_dataset(dataset_name='temp_data', vector_db=vector_db, query=prompt)
-        train_untrained_model(vector_db, prompt, model_path)
         prompt = input("Prompt: ")
