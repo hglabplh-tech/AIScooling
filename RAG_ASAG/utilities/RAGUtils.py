@@ -214,7 +214,6 @@ def build_vectors(complete_content, db_path, parent):
                                                   persist_path=db_path,
                                                   serializer="parquet")
     vector_db.persist()
-
     return vector_db
 
 
@@ -260,7 +259,7 @@ def get_rag_config_path():
     if not os.path.exists(conf_base_path):
         os.makedirs(conf_base_path)
     config_path = os.path.join(conf_base_path, "config.ini")
-    return config_path
+    return config_path, conf_base_path
 
 
 def get_db_inf_path():

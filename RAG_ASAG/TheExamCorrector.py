@@ -34,7 +34,8 @@ def read_exam_solution(exam_file):
     return questions, answers, keywords, points_array, tot_points
 
 def do_score(question, stud_answer, ref, keywords):
-    config = ConfigReader.myinstance(get_rag_config_path(), conf_section)
+    config_path, _ = get_rag_config_path()
+    config = ConfigReader.myinstance(config_path, conf_section)
     asag_semantic_weight = config.read_val_float('asag_semantic_weight')
     asag_jaccard_weight = config.read_val_float('asag_jaccard_weight')
     asag_bert_weight = config.read_val_float('asag_bert_weight')
@@ -54,7 +55,8 @@ def do_score(question, stud_answer, ref, keywords):
     return score, relevance, tot_score, tot_rel, score_jac, relevance_jac,distance_jac, rel_dist_jac, rule_grad, tdiff_scoring
 
 def calculate_points_per_item(ref, tot_score, tot_rel, rule_grad, tdiff_scoring, points):
-    config = ConfigReader.myinstance(get_rag_config_path(), conf_section)
+    config_path, _ = get_rag_config_path()
+    config = ConfigReader.myinstance(config_path, conf_section)
     asag_base_score_limit = config.read_val_float('asag_base_score_limit')
     asag_keywords_limit = config.read_val_float('asag_keywords_limit')
     asag_total_score_limit= config.read_val_float('asag_total_score_limit')
@@ -96,7 +98,8 @@ def score_answers(questions, answers, keyword_array, points_array, tot_points,st
     return round(percent, 0)
 
 def set_config(conf_section):
-    ConfigReader.myinstance(get_rag_config_path(), conf_section)
+    config_path, _ = get_rag_config_path()
+    ConfigReader.myinstance(config_path, conf_section)
     return config
 
 def read_exam_work(path, fname):

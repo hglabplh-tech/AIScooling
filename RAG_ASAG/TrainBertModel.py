@@ -569,7 +569,7 @@ def initialize_for_train(bert_model: BERT, dataloader: DataLoader[Any], device: 
     return dataloader, device, device_ids, loss_fn, optimizer, losses, num_epochs
 
 
-def get_model_instance(device: str) -> BERT:
+def get_model_instance(tokenizer, device: str) -> BERT:
     bert_model = BERT(vocab_size=tokenizer.get_vocab_size(),
                       hidden_size=768,
                       num_heads=12,
@@ -625,22 +625,15 @@ def make_mod_visible_and_train(bert_model, dataloader, num_epochs, device, optim
 
         _, base_model_path =  get_model_path()
         save_path =  os.path.join(base_model_path,  "bert_epoch_"  + str(epoch) + ".pt")
-        if device_ids is not None:
-            torch.save(bert_model.module.state_dict(), save_path)
-        else:
-            torch.save(bert_model.state_dict(), save_path)
-
-
-
+        save_model(bert_model, save_path, device_ids)
 
 def save_model(bert_model,  model_path, device_ids):
     if device_ids is not None:
-
         torch.save(bert_model.module, model_path)
     else:
         torch.save(bert_model, model_path)
 
-def load_model_and_train(model_path, question, answer, num_epochs=20): #, device_ids):
+def load_model_and_train(model_path, question, answer, num_epochs=8): #, device_ids):
     #if device_ids is not None:
     #    loaded_bert = bert_model.module.load_state_dict(torch.load(model_path, weights_only=False, map_location=device_ids))
     tokenizer  = get_bert_pre_req()
@@ -651,7 +644,7 @@ def load_model_and_train(model_path, question, answer, num_epochs=20): #, device
         loaded_bert  = loaded_bert.to(device)
     else:
         print(f"Get model instance  with device {device}")
-        loaded_bert  = get_model_instance(device)
+        loaded_bert  = get_model_instance(tokenizer, device)
     do_train_with_dataset(model_path, tokenizer, loaded_bert, question, answer,  num_epochs)
     return loaded_bert, device, device_ids
 

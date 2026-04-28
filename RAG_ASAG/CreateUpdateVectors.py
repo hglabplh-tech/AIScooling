@@ -103,7 +103,7 @@ if __name__ == '__main__':
         print("build vector")
         vector_db = build_vectors(complete_content, get_db_lit_path(), False)
     elif mode == 'add':
-        ret_code, complete_content = read_all_docs(['comp-add3'])
+        ret_code, complete_content = read_all_docs(['comp-add4'])
         print(complete_content[0])
         vector_db = add_documents(complete_content, get_db_inf_path(), False)
     elif mode == 'addhist':
