@@ -426,3 +426,38 @@ if __name__ == "__main__":
             q_result = q_result.append(response)
             printout_results(answer, result, relevance, q_result)
         query = input("give query or exit: ")
+
+
+def get_keywords(query,parent):
+    if parent:
+        api_key = get_app_key_in_parent()
+    else:
+        api_key = get_app_key()
+    client = OpenAI(api_key=api_key)
+
+# Send to OpenAI
+    response = client.chat.completions.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "You are a data generater."},
+            {"role": "user", "content": f"create up to four keywords for the answer  {query}"}
+        ]
+        )
+    return response.choices[0].message.content
+
+def get_query_keywords(query,parent):
+    if parent:
+        api_key = get_app_key_in_parent()
+    else:
+        api_key = get_app_key()
+    client = OpenAI(api_key=api_key)
+
+# Send to OpenAI
+    response = client.chat.completions.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "You are a keyword  generater."},
+            {"role": "user", "content": f"create up to five short keywords with only substantives no numbering for the query  {query}"}
+        ]
+        )
+    return response.choices[0].message.content

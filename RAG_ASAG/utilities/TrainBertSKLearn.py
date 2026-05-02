@@ -43,7 +43,7 @@ def add_to_dataset(dataset_name, vector_db, query):
         for text in texts:
             if not text:
                 text  =  'none'
-            csv_writer.writerow([index,text])
+            csv_writer.writerow([query,text])
             #index = uuid.uuid4().hex
         csv_file.close()
 

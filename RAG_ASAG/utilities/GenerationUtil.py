@@ -1,12 +1,8 @@
-import os
 import tempfile
-from  pathlib import Path
-from openai import  OpenAI
-from torch.testing._internal import generated
-from torch.utils import cmake_prefix_path
 from RAG_ASAG.utilities.RAGUtils import *
 
 from RAG_ASAG.utilities.RAGUtils import set_api_env_and_keys_in_parent
+from utilities.RAGUtils import get_keywords
 
 response = {}
 tmp_file = tempfile.NamedTemporaryFile()
@@ -31,22 +27,6 @@ def  read_from_temp(file_path):
         f.close()
     return result
 
-def get_keywords(query,parent):
-    if parent:
-        api_key = get_app_key_in_parent()
-    else:
-        api_key = get_app_key()
-    client = OpenAI(api_key=api_key)
-
-# Send to OpenAI
-    response = client.chat.completions.create(
-        model="gpt-4",
-        messages=[
-            {"role": "system", "content": "You are a data generater."},
-            {"role": "user", "content": f"create four keywords for the answer  {query}"}
-        ]
-        )
-    return response.choices[0].message.content
 
 if __name__ == '__main__':
     set_api_env_and_keys_in_parent()
