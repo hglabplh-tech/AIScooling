@@ -5,6 +5,7 @@ from random import shuffle
 from typing import Any
 
 import fitz  # PyMuPDF
+from pypdf._codecs import pdfdoc
 from rapidfuzz import process, fuzz
 
 
@@ -22,6 +23,8 @@ def get_pdf_files(path):
 
 def fuzzy_search_pdf(pdf_path, query,  num_key_words=4 ,threshold=80):
     doc = fitz.open(pdf_path)
+    base_name = os.path.basename(pdf_path)
+    base_wo_ext = base_name.split(".")[0]
     results = []
     for page_num, page in enumerate(doc):
         # 1. Extract words as a list of tuples: (x0, y0, x1, y1, "word", block_no, line_no, word_no)
@@ -31,35 +34,42 @@ def fuzzy_search_pdf(pdf_path, query,  num_key_words=4 ,threshold=80):
         word_strings = [w[4] for w in words_on_page]
         # 3. Use RapidFuzz to find similar strings
         matches_w = process.extract(query, word_strings, scorer=fuzz.WRatio, score_cutoff=threshold)
-        results_w = walk_result(matches_w, page_num, words_on_page, num_key_words=num_key_words)
+        results_w = walk_result(matches_w, page_num, words_on_page, base_wo_ext, num_key_words=num_key_words)
         if len(results_w) > 0:
             results.append(results_w)
     doc.close()
     return results
 
 
-def walk_result(matches, page_num,  words_on_page,num_key_words=4):
+def walk_result(matches, page_num,  words_on_page,base_name,num_key_words=4):
     results = []
     for match_str, score, index in matches:
         # Match word back to its original coordinate data
         rect = words_on_page[index][:num_key_words]
-        sentence = ''
-        char_blank = ' '
-        index = 0
-        for act_word in words_on_page:
-            if not index:
-                sentence += act_word[4]
-            else:
-                sentence  += (char_blank + act_word[4])
-            index  += 1
+        sentence = build_sentence(words_on_page)
         results.append({
+            "pdfdoc": base_name,
             "page": page_num + 1,
             "word": match_str,
             "score": score,
             "rect": rect,
-            "sentence": sentence
+            "content": sentence
         })
     return results
+
+
+def build_sentence(words_on_page) -> str:
+    sentence = ''
+    char_blank = ' '
+    index = 0
+    for act_word in words_on_page:
+        if not index:
+            sentence += act_word[4]
+        else:
+            sentence += (char_blank + act_word[4])
+        index += 1
+    return sentence
+
 
 def get_collections_path(rubric):
     return os.path.join(pathlib.Path.home(), "collections", rubric)
@@ -89,6 +99,19 @@ def print_results(overall_result, num_hits=15):
         value  = overall_result[index]
         if len(value) > 0:
             print(value)
+
+def get_results_cooked(raw_result):
+    cooked_overall_result_w = []
+    for result in raw_result:
+       cooked_overall_result_w.append(
+           [{"pdfdoc": result["pdfdoc"]},
+             {"page": result["page"],
+              "word": result["word"],
+              "score": result["score"],
+              "rect": result["rect"]},
+            {'content': result["content"]}])
+
+    return cooked_overall_result_w
 
 def extract_keywords(query, strict=True):
     keywords = get_query_keywords(query, True)
@@ -126,5 +149,5 @@ if __name__ == '__main__':
         dummy = input("Press enter to continue...")
         overall_result_w = search_all_pdfs(get_collections_path(rubric), key_string, num_key_words=num_keys, threshold=int(threshold))
         overall_sorted_w = sort_by_score(overall_result_w)
-        print_results(overall_sorted_w)
+        print_results(get_results_cooked(overall_sorted_w))
         query = input("Enter query: ")
