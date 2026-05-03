@@ -46,12 +46,13 @@ def walk_result(matches, page_num,  words_on_page,base_name,num_key_words=4):
     for match_str, score, index in matches:
         # Match word back to its original coordinate data
         rect = words_on_page[index][:num_key_words]
+        score_scaled = float(score / 100)
         sentence = build_sentence(words_on_page)
         results.append({
             "pdfdoc": base_name,
             "page": page_num + 1,
             "word": match_str,
-            "score": score,
+            "score": score_scaled,
             "rect": rect,
             "content": sentence
         })
@@ -79,7 +80,6 @@ def search_all_pdfs(dir_path, query, num_key_words=4, threshold=80):
     files = get_pdf_files(dir_path)
     overall_result_w = []
     for file in files:
-        print(file)
         results_w = fuzzy_search_pdf(file, query, num_key_words=num_key_words,threshold=threshold)
         if len(results_w) > 0:
             for result in results_w:
@@ -117,37 +117,83 @@ def extract_keywords(query, strict=True):
     keywords = get_query_keywords(query, True)
     print(keywords)
     keyword_array = keywords.split(". ")
+    cleaned_keywords = split_by_chars(keyword_array, ['\n', '\"', ' '], filter_dec=True)
     index = 0
     keys = []
-    for keyword in keyword_array:
-        mod_index = index % 2
-        if mod_index != 0:
-            keyword_split = keyword.split(" ")
-            for  index in range(len(keyword_split)):
-                k = keyword_split[index].lower()
-                if k and (k in query or not strict) and not k in keys:
-                    keys.append(k)
-        index += 1
+    print(len(cleaned_keywords))
+    print(cleaned_keywords)
+    for keyword in cleaned_keywords:
+        keyword_split = keyword.split(" ")
+        for  i in range(len(keyword_split)):
+            k = keyword_split[i].lower()
+            if k and (k in query or not strict) and not k in keys:
+                keys.append(k)
     my_shuffle(keys)
     key_string = " ".join(keys)
     print(key_string)
     return key_string.strip(),len(keys)
+
+
+def split_by_chars(keyword_array: list[str], chars_list: list[str], filter_dec=False):
+    keyword_recur = keyword_array
+    keyword_pre = []
+    for character in chars_list:
+        for pre in keyword_recur:
+            res = pre.split(character)
+            for word in res:
+                keyword_pre.append(word.strip())
+        keyword_recur = keyword_pre
+        keyword_pre = []
+        print(keyword_recur)
+
+    if filter_dec:
+        cleaned_keywords = []
+        for keyword in keyword_recur:
+            keyword = keyword.lower().strip()
+            if not keyword.isdecimal():
+                cleaned_keywords.append(keyword)
+        return cleaned_keywords
+    else:
+        return keyword_recur
+
 
 def my_shuffle(keys):
     random.shuffle(keys)
     return keys
 
 
+def get_key_strict(query):
+    strict = False
+    if query  != 'exit':
+        strict_keys = input("Enter strict keys(y/n): ")
+        if  strict_keys == "y":
+            strict = True
+        else:
+            strict = False
+    else:
+        strict = False
+    print(f"Strict query : {strict}")
+    return strict
+
+
+def get_threshold():
+    threshold = input("Enter threshold: ")
+    if not threshold or not threshold.isdecimal():
+        threshold = 80
+    print(f"Threshold : {threshold}")
+    return threshold
+
+
 if __name__ == '__main__':
     rubric =  input("Enter rubric: ")
     query = input("Enter query: ")
-    threshold = input("Enter threshold: ")
-    if not threshold:
-        threshold = 80
+    threshold  = get_threshold()
+    strict_keys = get_key_strict(query)
     while query != "exit":
-        key_string, num_keys = extract_keywords(query, strict=False)
+        key_string, num_keys = extract_keywords(query, strict=strict_keys)
         dummy = input("Press enter to continue...")
         overall_result_w = search_all_pdfs(get_collections_path(rubric), key_string, num_key_words=num_keys, threshold=int(threshold))
-        overall_sorted_w = sort_by_score(overall_result_w)
-        print_results(get_results_cooked(overall_sorted_w))
+        overall_sorted_w = get_results_cooked(sort_by_score(overall_result_w))
+        print_results(overall_sorted_w, num_hits=25)
         query = input("Enter query: ")
+        strict_keys = get_key_strict(query)
