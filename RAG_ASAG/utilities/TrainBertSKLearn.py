@@ -23,10 +23,13 @@ from sklearn.utils import Bunch
 import numpy as np  # For computations
 
 
-def create_BERTBase():
+def create_BERTBase(model_path):
     # 1. Initialize tokenizer and model for regression (outputting a score)
     model_name = "bert-base-uncased"
-    tokenizer = BertTokenizer.from_pretrained(model_name)
+    if os.path.exists(model_path):
+        tokenizer = BertTokenizer.from_pretrained(model_path)
+    else:
+        tokenizer = BertTokenizer.from_pretrained(model_name)
     model = BertForSequenceClassification.from_pretrained(model_name, num_labels=4) # 1 for regression
     text  = load_csv('temp_data')
     tokenizer.tokenize(text)
@@ -96,7 +99,7 @@ def train_untrained_model(model_path):
     # Initialize the BERT classifier
     model_name = "bert-base-uncased"
 
-    tokenizer_bert, model, _ = create_BERTBase()
+    tokenizer_bert, model, _ = create_BERTBase(model_path)
     texts =load_csv('temp_data')
     model.train_batch_size  =  24
     encoded = tokenize_function(tokenizer_bert, texts)
@@ -104,7 +107,7 @@ def train_untrained_model(model_path):
         labels = to.tensor([1])
         print(encoded)
         dataset = TensorDataset(encode['input_ids'], encode['attention_mask'], labels)
-        loader = DataLoader(dataset, batch_size=2, shuffle=True)
+        loader = DataLoader(dataset, batch_size=2, shuffle=False)
         optimizer = AdamW(model.parameters(), lr=5e-5)
         epochs = 5
         train_model(loader, model, optimizer, epochs)
@@ -140,7 +143,12 @@ def train_model(loader: DataLoader[tuple[Tensor, ...]], model: BertForSequenceCl
 
 
 def save_model(bert_model,  model_path):
-    to.save(bert_model, model_path)
+    #to.save(bert_model, model_path)
+    bert_model.save_pretrained(model_path)
+
+def load_model(model_path):
+    bert_model = to.load(model_path, weights_only=False)
+
 
 if  __name__ == '__main__':
     base_path = get_db_base_path()

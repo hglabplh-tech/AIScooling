@@ -25,18 +25,7 @@ from langchain_ollama import OllamaEmbeddings
 
 
 from utilities.RAGUtils import build_vectors, get_db_lit_path, get_db_inf_path, get_db_history_path, actual_time
-from utilities.RAGUtils import CHUNK_SIZE, add_documents, read_all_docs, get_db_base_path
-
-def get_embedding(key: str):
-    if key == 'openai':
-        set_api_env_and_keys()
-        return OpenAIEmbeddings()
-    if key == 'ollama':
-        return OllamaEmbeddings(model="llama3.1")
-    elif key == 'huggingface':
-        return HuggingFaceEmbeddings()
-    else:
-        return DeterministicFakeEmbedding(size=4096)
+from utilities.RAGUtils import CHUNK_SIZE, add_documents, read_all_docs, get_db_base_path, get_embedding
 
 
 def get_app_key():
@@ -73,9 +62,25 @@ def update_vectors(complete_content):
         chunk_overlap=chunk_overlap,
         add_start_index=True
     )
-    embeddings = get_embedding('openai')
+    embeddings = get_embedding('huggingface', parent=False)
     chunks = splitter.split_text(complete_content)
 
+    return vector_db
+
+def processInputAndImport(data_rel_path, db_path):
+    first = True
+    data_path = os.path.join(Path.home(), 'collections', data_rel_path)
+    filenames = os.listdir(data_path)
+
+    for filename in filenames:
+        ret_code, complete_content = read_all_docs(data_path, filename)
+        if first:
+            print("build vector-db")
+            build_vectors(complete_content, db_path, False)
+            first = False
+        else:
+            print("add to vector-db")
+            add_documents(complete_content, db_path, False)
     return vector_db
 
 if __name__ == '__main__':
@@ -85,33 +90,15 @@ if __name__ == '__main__':
     print(f"start collecting pdf datas at {actual_time()}....")
     print(get_db_base_path())
     if mode == 'create':
-        ret_code, complete_content = read_all_docs(
-            ['compscience'])
-
-        print("build vector")
-        vector_db = build_vectors(complete_content, get_db_inf_path(), False)
+        vector_db = processInputAndImport('compscience', get_db_inf_path())
     elif mode == 'createhist':
-        ret_code, complete_content = read_all_docs(
-            ['history'])
-
-        print("build vector")
-        vector_db = build_vectors(complete_content, get_db_history_path(), False)
+        vector_db = processInputAndImport('history', get_db_history_path())
     elif mode == 'createlit':
-        ret_code, complete_content = read_all_docs(
-            ['literature'])
-
-        print("build vector")
-        vector_db = build_vectors(complete_content, get_db_lit_path(), False)
+        vector_db = processInputAndImport('literature', get_db_lit_path())
     elif mode == 'add':
-        ret_code, complete_content = read_all_docs(['comp-add4'])
-        print(complete_content[0])
-        vector_db = add_documents(complete_content, get_db_inf_path(), False)
+        print("not yet implemented renewed later")
     elif mode == 'addhist':
-        ret_code, complete_content = read_all_docs(['/Users/hglabplhak/collections/history_edu/more_ger'])
-        print(complete_content[0])
-        vector_db = add_documents(complete_content, get_db_history_path(), False)
+        print("not yet implemented renewed later")
     elif mode == 'addlit':
-        ret_code, complete_content = read_all_docs(['/Users/hglabplhak/collections/history_edu/more_ger'])
-        print(complete_content[0])
-        vector_db = add_documents(complete_content, get_db_lit_path(), False)
+        print("not yet implemented renewed later")
     print(f"ready at {actual_time()}")

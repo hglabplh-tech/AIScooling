@@ -3,15 +3,18 @@ from RAG_ASAG.utilities.RAGUtils import *
 
 from RAG_ASAG.utilities.RAGUtils import set_api_env_and_keys_in_parent
 from utilities.RAGUtils import get_keywords
+from RAG_ASAG.utilities.HuggingChat import HuggingChat
 
 response = {}
 tmp_file = tempfile.NamedTemporaryFile()
 
 def generate_text(prompt, model="gpt-4"):
-    client = OpenAI()
+    client = HuggingChat(dtype='cuda',
+                         device_map='auto',
+                         model_id= "openai/gpt-oss-20b")
 
     #  ResponseTextConfigParam
-    response = client.responses.create(model= model,  input= prompt)
+    response = client.execute_query("Generate answer", prompt)
 
     return response
 

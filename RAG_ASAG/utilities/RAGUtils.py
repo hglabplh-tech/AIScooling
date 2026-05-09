@@ -20,7 +20,7 @@ from langchain_ollama import OllamaEmbeddings
 from langchain_classic.chains import LLMChain, SimpleSequentialChain
 from langchain_classic.chains import RetrievalQA
 from langchain_core.output_parsers import StrOutputParser
-from openai import OpenAI
+from RAG_ASAG.utilities.HuggingChat import HuggingChat
 import pandas as pd
 
 CSIZE_CONST = 1024
@@ -85,24 +85,19 @@ def extract_doc_from_pdf(file_path):
 
 def analyze_CSV(csv_file_path, query,parent):
     if parent:
-        api_key = get_app_key_in_parent()
+        set_api_env_and_keys_in_parent()
     else:
-        api_key = get_app_key()
-    client = OpenAI(api_key=api_key)
+        set_api_env_and_keys()
 
+    client = HuggingChat()
 # Load CSV data
     df = pd.read_csv(csv_file_path)
     csv_string = df.to_string()
 
 # Send to OpenAI
-    response = client.chat.completions.create(
-        model="gpt-4",
-        messages=[
-            {"role": "system", "content": "You are a data researcher."},
-            {"role": "user", "content": f"where criteria is   {query}  in this data\n{csv_string}"}
-        ]
-        )
-    return response.choices[0].message.content
+    response = client.execute_query("You are a data researcher.",
+            "where criteria is   {query}  in this data\n{csv_string}" )
+    return response.content
 
 
 def read_lines(file_path):
@@ -119,36 +114,35 @@ def get_suffix(f, suffix: str):
 # %% [markdown]
 #
 # %%
-def read_all_docs(data_paths):
+def read_all_docs(data_path_start, sub_path):
     content_array = []
-    for data_rel_path in data_paths:
-        data_path = os.path.join(Path.home(), 'collections', data_rel_path)
-        filenames = os.listdir(data_path)
-        for filename in filenames:
-            content_path = os.path.join(data_path, filename)
-            print(f"Collecting: {content_path}.... ")
-            if get_suffix(content_path, 'pdf'):
-                documents = extract_doc_from_pdf(content_path)
+    data_path = os.path.join(data_path_start, sub_path)
+    filenames = os.listdir(data_path)
+    for filename in filenames:
+        content_path = os.path.join(data_path, filename)
+        print(f"Collecting: {content_path}.... ")
+        if get_suffix(content_path, 'pdf'):
+            documents = extract_doc_from_pdf(content_path)
+            content_array = content_array + documents
+        elif get_suffix(content_path, 'txt'):
+            documents = extract_doc_from_text(content_path)
+            content_array = content_array + documents
+        elif get_suffix(content_path, 'md'):
+            documents = extract_doc_from_markdown(content_path)
+            content_array = content_array + documents
+        elif get_suffix(content_path, 'docx'):
+            documents = extract_doc_from_word(content_path)
+            content_array = content_array + documents
+        elif get_suffix(content_path, 'html') or get_suffix(content_path, 'htm'):
+            documents = extract_doc_from_html(content_path)
+            content_array = content_array + documents
+        elif get_suffix(content_path, 'wbx'):
+            lines = read_lines(content_path)
+            for url in lines:
+                documents = extract_doc_from_web_html(url)
                 content_array = content_array + documents
-            elif get_suffix(content_path, 'txt'):
-                documents = extract_doc_from_text(content_path)
-                content_array = content_array + documents
-            elif get_suffix(content_path, 'md'):
-                documents = extract_doc_from_markdown(content_path)
-                content_array = content_array + documents
-            elif get_suffix(content_path, 'docx'):
-                documents = extract_doc_from_word(content_path)
-                content_array = content_array + documents
-            elif get_suffix(content_path, 'html') or get_suffix(content_path, 'htm'):
-                documents = extract_doc_from_html(content_path)
-                content_array = content_array + documents
-            elif get_suffix(content_path, 'wbx'):
-                lines = read_lines(content_path)
-                for url in lines:
-                    documents = extract_doc_from_web_html(url)
-                    content_array = content_array + documents
-            else:
-                print(f"The {content_path} cannot pe processed.... go on with next entry")
+        else:
+            print(f"The {content_path} cannot pe processed.... go on with next entry")
     return 0, content_array
 
 
@@ -205,7 +199,7 @@ def build_vectors(complete_content, db_path, parent):
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap
     )
-    embeddings = get_embedding('openai', parent)
+    embeddings = get_embedding('huggingface', parent)
     print(f"The complete count of documents is: {len(complete_content)}")
     print(f"The first element is : {complete_content[0]}")
     chunks = splitter.split_documents(complete_content)
@@ -218,7 +212,7 @@ def build_vectors(complete_content, db_path, parent):
 
 
 def add_documents(complete_content, db_path, parent):
-    embeddings = get_embedding('openai', parent)
+    embeddings = get_embedding('huggingface', parent)
     chunk_size, chunk_overlap = CHUNK_SIZE()
     vector_db = SKLearnVectorStore(embedding=embeddings,
                                    persist_path=db_path,
@@ -311,7 +305,7 @@ def set_api_env_and_keys_in_parent():
 
 
 def get_vector_db(db_path, parent):
-    embeddings = get_embedding('openai', parent)
+    embeddings = get_embedding('huggingface', parent)
     #embeddings = DeterministicFakeEmbedding(size=4096)
     #embeddings = DeterministicFakeEmbedding(size=1024)
     #embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
@@ -350,8 +344,8 @@ def generate_follow_ups(vector_db, original_query, context, generated_answer):
         "Logic Task:\n"
         "1. Identify key terms in the Knowledge that weren't fully explained in the Answer.\n"
         "2. Write a summary\n"
-        #"3. Propose 3 follow-up questions that lead to a deeper understanding.\n"
-        "3. Propose 3 follow-up questions\n"
+        "3. Propose 3 follow-up questions that lead to a deeper understanding.\n"
+        #"3. Propose 3 follow-up questions\n"
         "4. Give the references \n"
 
     )
@@ -391,17 +385,21 @@ def query_execute(vector_db, query):
 
 
 def get_embedding(key: str, parent: bool):
+    if parent:
+        set_api_env_and_keys_in_parent()
+    else:
+        set_api_env_and_keys()
     if key == 'openai':
-        if parent:
-            set_api_env_and_keys_in_parent()
-        else:
-            set_api_env_and_keys()
+        print('OpenAI Embeddings selected')
         return OpenAIEmbeddings()
     if key == 'ollama':
-        return OllamaEmbeddings(model="llama3.1")
+        print('Ollama Embeddings selected')
+        return OllamaEmbeddings(model="qwen3:latest")
     elif key == 'huggingface':
+        print('Hugging Face Embeddings selected')
         return HuggingFaceEmbeddings()
     else:
+        print('Fake Embeddings selected')
         return DeterministicFakeEmbedding(size=4096)
 
 
@@ -430,34 +428,28 @@ if __name__ == "__main__":
 
 def get_keywords(query,parent):
     if parent:
-        api_key = get_app_key_in_parent()
+        set_api_env_and_keys_in_parent()
     else:
-        api_key = get_app_key()
-    client = OpenAI(api_key=api_key)
+        set_api_env_and_keys()
+    client = HuggingChat()
 
 # Send to OpenAI
-    response = client.chat.completions.create(
-        model="gpt-4",
-        messages=[
-            {"role": "system", "content": "You are a data generater."},
-            {"role": "user", "content": f"create up to four keywords for the answer  {query}"}
-        ]
-        )
-    return response.choices[0].message.content
+    response = client.execute_query("You are a keyword generator.",
+            f"create up to four keywords for the answer  {query}")
+    return response.content
 
 def get_query_keywords(query,parent):
     if parent:
-        api_key = get_app_key_in_parent()
+        set_api_env_and_keys_in_parent()
     else:
-        api_key = get_app_key()
-    client = OpenAI(api_key=api_key)
+        set_api_env_and_keys()
+    client = HuggingChat(dtype='cuda',
+                         device_map='auto',
+                         model_id= "openai/gpt-oss-20b")
 
 # Send to OpenAI
-    response = client.chat.completions.create(
-        model="gpt-4",
-        messages=[
-            {"role": "system", "content": "You are a keyword  generater."},
-            {"role": "user", "content": f"create up to five short keywords with only substantives no numbering for the query  {query}"}
-        ]
-        )
-    return response.choices[0].message.content
+    response = client.execute_query("You are a keyword generator.",
+                                    f"create up to five short keywords with only substantives no numbering for the query  {query}")
+
+
+    return response.content
