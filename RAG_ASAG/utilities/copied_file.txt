@@ -1,0 +1,27 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class SoftmaxLSTM(nn.Module):
+    def __init__(self, input_dim, hidden_dim, vocab_size):
+        super(SoftmaxLSTM, self).__init__()
+        self.lstm = nn.LSTM(input_dim, hidden_dim, batch_first=True)
+        self.fc = nn.Linear(hidden_dim, vocab_size)
+        # You can define it here as a layer
+        self.softmax = nn.Softmax(dim=-1)
+
+    def forward(self, x):
+        out, _ = self.lstm(x)
+        # Take the last time step
+        logits = self.fc(out[:, -1, :])
+
+        # Convert raw logits to probabilities [0, 1]
+        probs = self.softmax(logits)
+        return probs
+
+# Usage
+model = SoftmaxLSTM(10, 32, 1000)
+sample_input = torch.randn(8, 5, 10)
+probabilities = model(sample_input)
+
+print(probabilities[0].sum()) # Output: tensor(1.0000) -> Proves it's normalized
