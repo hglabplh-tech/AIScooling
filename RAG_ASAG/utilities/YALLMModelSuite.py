@@ -6,33 +6,60 @@ from datasets import load_dataset
 from torch.utils.data import Dataset, DataLoader
 from tqdm.auto import tqdm, trange
 
+from RAG_ASAG.utilities.RAGUtils import extract_doc_from_pdf
+
 class YALLMModel(nn.Module):
-    def __init__(self, input_dim=10, hidden_dim=64, layer_dim=4, output_dim=1):
+    def __init__(self, input_dim=10,
+                 embed_dim = 10,
+                 hidden_dim=64,
+                 vocab_size=7000,
+                 layer_dim=4,
+                 output_dim=1,
+                 softmax=False):
         super(YALLMModel, self).__init__()
         # Defining the number of layers and the nodes in each layer
         self.hidden_dim = hidden_dim
         self.layer_dim = layer_dim
+        self.output_dim = output_dim
+        self.embedding = nn.Embedding(input_dim, hidden_dim)
+        self.embed_dim = embed_dim
+        self.vocab_size = vocab_size
         # LSTM Layer
         # batch_first=True ensures input shape is (batch, seq, feature)
         self.lstm = nn.LSTM(input_dim, hidden_dim, layer_dim, batch_first=True)
 
         # Fully connected layer to convert hidden state to final output
         self.fc = nn.Linear(hidden_dim, output_dim)
+        self.softmax = softmax
         self.log_softmax = nn.LogSoftmax(dim=-1)
 
 
     def forward(self, x = torch.randn(8, 5, 10)):
-        # Initializing hidden state (h0) and cell state (c0) with zeros
-        h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to(x.device)
-        c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to(x.device)
+        if self.softmax:
+            out, _ = self.lstm(x)
+            # Take the last time step
+            logits = self.fc(out[:, -1, :])
 
-        # out: tensor of shape (batch_size, seq_length, hidden_dim)
-        out, (hn, cn) = self.lstm(x, (h0, c0))
+            # Convert raw logits to probabilities [0, 1]
+            probs = self.log_softmax(logits)
+            return probs
+        else:
+            #x = self.embedding(x)
+            #out, _ = self.lstm(x)
+            # We give only back the last logits of the epoch
+            #logits = self.fc(out[:, -1, :])
+            #return logits
+            # Initializing hidden state (h0) and cell state (c0) with zeros
+            h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to(x.device)
+            c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to(x.device)
 
-        # We only need the last time step's output for the final prediction
-        # out[:, -1, :] extracts (batch_size, hidden_dim)
-        out = self.fc(out[:, -1, :])
-        return out
+            #out: tensor of shape (batch_size, seq_length, hidden_dim)
+            out, (hn, cn) = self.lstm(x, (h0, c0))
+
+            # We only need the last time step's output for the final prediction
+            # out[:, -1, :] extracts (self.batch_size, self.hidden_dim)
+            out = self.fc(out[:, -1, :])
+            return out
 
     def train_model(self, dataloader, epochs=5):
         criterion = nn.CrossEntropyLoss()  # Waits for Logits!
@@ -61,7 +88,7 @@ class YATokenizer:
         self.id_to_word = {}
         self.special_tokens = special_tokens
 
-    def build_vocab(self, corpus):
+    def build_vocab(self, corpus, is_text=False):
         # Flatten all text and count word frequencies
         words = " ".join(corpus).split()
         counts = Counter(words)
@@ -134,6 +161,58 @@ class YATokenizer:
             return clean(token_ids)
         return [clean(seq) for seq in token_ids]
 
+
+class YALLMInferencePipeline:
+    def __init__(self, model_path, tokenizer_path, config_path):
+        # 1. Device bestimmen (GPU falls verfügbar)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # 2. Konfiguration laden
+        with open(config_path, "r", encoding="utf-8") as f:
+            self.config = json.load(f)
+
+        # 3. Tokenizer laden
+        # (Nutzt die .from_json Methode aus den vorherigen Schritten)
+        self.tokenizer = YATokenizer.from_json(tokenizer_path)
+
+        # 4. Modell laden und Gewichte zuweisen
+        # (Nutzt die LSTMModel-Klasse aus den vorherigen Schritten)
+        self.model = YALLMModel(
+            vocab_size=self.config["vocab_size"],
+            embed_dim=self.config["embed_dim"],
+            hidden_dim=self.config["hidden_dim"]
+        )
+        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+        self.model.to(self.device)
+        self.model.eval()  # Wichtig: Schaltet Dropout/Batchnorm für Inferenz aus
+
+    def __call__(self, text, return_probabilities=False):
+        """
+        Ermöglicht es, die Pipeline wie eine Funktion aufzurufen: pipeline("text")
+        """
+        # 1. Text zu Tensor konvertieren und auf das richtige Device schieben
+        input_tensor = self.tokenizer.batch_encode(
+            [text],
+            max_len=self.config["max_len"]
+        ).to(self.device)
+
+        # 2. Inferenz ohne Gradientenberechnung
+        with torch.no_grad():
+            logits = self.model(input_tensor)
+            probs = torch.softmax(logits, dim=-1)
+            predicted_id = torch.argmax(probs, dim=-1)
+
+        # 3. ID zurück in Text decodieren
+        predicted_text = self.tokenizer.decode(predicted_id)[0]
+
+        # 4. Rückgabe formatieren
+        if return_probabilities:
+            confidence = probs[0, predicted_id.item()].item()
+            return {"prediction": predicted_text, "confidence": confidence}
+
+        return predicted_text
+
+
 class YATextDataset(Dataset):
     def __init__(self, texts, tokenizer, max_len=10):
         self.texts = texts
@@ -181,16 +260,26 @@ if __name__ == '__main__':
     print(f"Output Shape: {prediction.shape}")  # [8, 1]
 
     # Usage of tokenizer
-    raw_data = ["hello world", "pytorch is great", "lstm models are powerful"]
+    vocab_data = []
+    raw_data = extract_doc_from_pdf(file_path="./test.pdf", as_doc=False)
+    vocab_data.append(raw_data)
+    raw_data = extract_doc_from_pdf(file_path="./test_two.pdf", as_doc=False)
+    vocab_data.append(raw_data)
+    raw_data = extract_doc_from_pdf(file_path="./test_three.pdf", as_doc=False)
+    vocab_data.append(raw_data)
+    raw_data = extract_doc_from_pdf(file_path="./test_four.pdf", as_doc=False)
+    vocab_data.append(raw_data)
+    input_vocab = vocab_data[0] + vocab_data[1] + vocab_data[2] + vocab_data[3]
+    print(input_vocab)
     tokenizer = YATokenizer()
     tokenizer.build_vocab(raw_data)
 
     dataset = YATextDataset(raw_data, tokenizer)
-    loader = DataLoader(dataset, batch_size=2)
-
+    loader = DataLoader(dataset, batch_size=3)
+    model.train_model(loader)
     # 1. Load your local data or a hub dataset
-    # ds = load_dataset("csv", data_files="my_data.csv")
-    ds = load_dataset("imdb", split="train[:100]")  # Example with built-in data
+    ds = load_dataset("csv", data_files="my_data.csv", split="train[:100]")
+    #ds = load_dataset("imdb", split="train[:100]")  # Example with built-in data
 
     # 3. Apply the mapping
     tokenized_ds = ds.map(tokenize_function, batched=True)
@@ -199,4 +288,7 @@ if __name__ == '__main__':
     tokenizer.to_json(file_path="./YALLMModelSuite.json")
     # Usage
     tokenizer = YATokenizer.from_json(file_path="./YALLMModelSuite.json")
-    print(tokenizer.encode("hello world"))
+    encoded = tokenizer.encode("hello world here I am walking like a hurricane with ice in my eyes")
+    decoded = tokenizer.decode(encoded)
+    print(encoded)
+    print(decoded)

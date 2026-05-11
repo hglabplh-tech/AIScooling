@@ -68,7 +68,7 @@ def extract_doc_from_word(file_path):
     return docs
 
 
-def extract_doc_from_pdf(file_path):
+def extract_doc_from_pdf(file_path, as_doc=True):
     # creating a pdf reader object
 
     loader = PyPDFLoader(
@@ -80,8 +80,14 @@ def extract_doc_from_pdf(file_path):
     # printing number of pages in pdf file
     page_count = len(documents)
     print(f'Number of pages: {page_count}')
-    # getting a specific page from the pdf file
-    return documents
+    if as_doc:
+        # getting a specific page from the pdf file
+        return documents
+    else:
+        text = []
+        for page in range(page_count):
+            text.append(documents[page].page_content)
+        return text
 
 def analyze_CSV(csv_file_path, query,parent):
     if parent:
