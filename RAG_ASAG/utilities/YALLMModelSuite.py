@@ -4,8 +4,9 @@ import json
 from collections import Counter
 from datasets import load_dataset
 from torch.utils.data import Dataset, DataLoader
+from tqdm.auto import tqdm, trange
 
-class YALLMModel:
+class YALLMModel(nn.Module):
     def __init__(self, input_dim=10, hidden_dim=64, layer_dim=4, output_dim=1):
         super(YALLMModel, self).__init__()
         # Defining the number of layers and the nodes in each layer
@@ -33,6 +34,26 @@ class YALLMModel:
         out = self.fc(out[:, -1, :])
         return out
 
+    def train_model(self, dataloader, epochs=5):
+        criterion = nn.CrossEntropyLoss()  # Waits for Logits!
+        optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
+        losses = []
+        # Training Loop (simplified)
+        for epoch in trange(epochs, desc="Epoch"):
+            for step, (input_ids, attention_mask, labels) in enumerate(
+                    tqdm(dataloader, position=1, leave=True, desc="Step")):
+                self.train()
+                optimizer.zero_grad()
+
+                inputs = torch.randint(0, 1000, (8, 5))  # Dummy Batch
+                targets = torch.randint(0, 1000, (8,))
+
+                logits = self(inputs)
+                loss = criterion(logits, targets)
+                loss.backward()
+                optimizer.step()
+                losses.append(loss.item())
+                print("Epoch {}, Step {}, Loss: {}".format(epoch, step, loss.item()))
 
 class YATokenizer:
     def __init__(self,  vocab=None, special_tokens=["<PAD>", "<UNK>"]):
