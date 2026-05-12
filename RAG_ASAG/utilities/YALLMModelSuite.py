@@ -1,15 +1,20 @@
+from typing import Mapping, Any
+
 import torch.nn as nn
 import torch
 import json
 from collections import Counter
 from datasets import load_dataset
+from torch import Tensor
 from torch.utils.data import Dataset, DataLoader
 from tqdm.auto import tqdm, trange
+from transformers.generation.continuous_batching.utils import build_attention_mask
 
 from RAG_ASAG.utilities.RAGUtils import extract_doc_from_pdf
 
 class YALLMModel(nn.Module):
     def __init__(self, input_dim=10,
+                 labels=[],
                  embed_dim = 10,
                  hidden_dim=64,
                  vocab_size=7000,
@@ -19,6 +24,7 @@ class YALLMModel(nn.Module):
         super(YALLMModel, self).__init__()
         # Defining the number of layers and the nodes in each layer
         self.hidden_dim = hidden_dim
+        self.labels = labels
         self.layer_dim = layer_dim
         self.output_dim = output_dim
         self.embedding = nn.Embedding(input_dim, hidden_dim)
@@ -31,7 +37,7 @@ class YALLMModel(nn.Module):
         # Fully connected layer to convert hidden state to final output
         self.fc = nn.Linear(hidden_dim, output_dim)
         self.softmax = softmax
-        self.log_softmax = nn.LogSoftmax(dim=-1)
+        self.log_softmax = nn.LogSoftmax(dim=2)
 
 
     def forward(self, x = torch.randn(8, 5, 10)):
@@ -58,29 +64,56 @@ class YALLMModel(nn.Module):
 
             # We only need the last time step's output for the final prediction
             # out[:, -1, :] extracts (self.batch_size, self.hidden_dim)
-            out = self.fc(out[:, -1, :])
+            out = self.fc(out[:,-1,  :])
             return out
 
-    def train_model(self, dataloader, epochs=5):
+    def train_model(self, loader: DataLoader[tuple[Tensor, ...]], epochs=5):
         criterion = nn.CrossEntropyLoss()  # Waits for Logits!
         optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
         losses = []
         # Training Loop (simplified)
-        for epoch in trange(epochs, desc="Epoch"):
-            for step, (input_ids, attention_mask, labels) in enumerate(
-                    tqdm(dataloader, position=1, leave=True, desc="Step")):
-                self.train()
-                optimizer.zero_grad()
+        self.train()
+        step = 0
+        for epoch in range(epochs):
+            for batch in loader:
+                # Move batch to GPU
+                batch.to('cpu')
+                input_tensor = torch.randn(5, 5, 10)
+                input_tensor.to('cpu')
+                # Clear previous gradients
+                self.zero_grad()
 
-                inputs = torch.randint(0, 1000, (8, 5))  # Dummy Batch
-                targets = torch.randint(0, 1000, (8,))
+                # Forward pass
+                outputs = self(input_tensor)
+                # Backward pass
 
-                logits = self(inputs)
-                loss = criterion(logits, targets)
+
+                # Update weights
+                optimizer.step()
+
+                logits = self(input_tensor)
+                loss = criterion(logits, outputs)
                 loss.backward()
                 optimizer.step()
                 losses.append(loss.item())
                 print("Epoch {}, Step {}, Loss: {}".format(epoch, step, loss.item()))
+                step += 1
+
+    def save_state_dict(self, pkl_path):
+        torch.save(self.state_dict(), pkl_path)
+
+    def save_model(self, model_path):
+        self.save_pretrained(model_path)
+
+    @classmethod
+    def load_model(cls, model_path):
+        return torch.load(model_path)
+
+    def load_state_dict(
+        self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False
+    ):
+        self.load_state_dict(state_dict, strict=strict, assign=assign)
+
 
 class YATokenizer:
     def __init__(self,  vocab=None, special_tokens=["<PAD>", "<UNK>"]):
@@ -249,7 +282,7 @@ if __name__ == '__main__':
     # --- Setup and Usage ---
 
     # Params: 10 input features, 32 hidden units, 2 stacked layers, 1 output value
-    model = YALLMModel(input_dim=10, hidden_dim=32, layer_dim=2, output_dim=1)
+    model = YALLMModel(input_dim=10, hidden_dim=64, layer_dim=3, output_dim=1)
 
     # Dummy Input: (Batch Size=8, Sequence Length=5, Features=10)
     random_input = torch.randn(8, 5, 10)
@@ -278,7 +311,7 @@ if __name__ == '__main__':
     loader = DataLoader(dataset, batch_size=3)
     model.train_model(loader)
     # 1. Load your local data or a hub dataset
-    ds = load_dataset("csv", data_files="my_data.csv", split="train[:100]")
+    ds = load_dataset("csv", data_files="./lang_words.csv")
     #ds = load_dataset("imdb", split="train[:100]")  # Example with built-in data
 
     # 3. Apply the mapping
