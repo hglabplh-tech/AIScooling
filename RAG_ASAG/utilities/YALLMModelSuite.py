@@ -79,7 +79,7 @@ class YALLMModel(nn.Module):
         self.train()
         step = 0
         for epoch in range(epochs):
-            for batch in loader: ##TODO: really use data next step !!!! ERROR
+            for batch in loader: ##TODO: really use data next step !!!! ERROR --> enhance to append to vocab - file see emails.... look at the whole thing !!!!
                 # Move batch to GPU
                 input_tensor = torch.randn(self.layer_dim, self.embed_dim, self.input_dim, device='cpu', requires_grad=False)
                 input_tensor.to('cpu')
