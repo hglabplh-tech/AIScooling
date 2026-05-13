@@ -1,7 +1,10 @@
+import os
 from typing import Mapping, Any
 
 import torch.nn as nn
 import torch
+from torch.utils.data import TensorDataset, DataLoader, random_split
+from transformers import AutoTokenizer
 import json
 from collections import Counter
 from datasets import load_dataset
@@ -9,12 +12,12 @@ from torch import Tensor
 from torch.utils.data import Dataset, DataLoader
 from tqdm.auto import tqdm, trange
 from transformers.generation.continuous_batching.utils import build_attention_mask
+from RAG_ASAG.utilities.RAGUtils import get_model_path, extract_csv_data
 
 from RAG_ASAG.utilities.RAGUtils import extract_doc_from_pdf
 
 class YALLMModel(nn.Module):
     def __init__(self, input_dim=10,
-                 labels=[],
                  embed_dim = 10,
                  hidden_dim=64,
                  vocab_size=7000,
@@ -23,8 +26,8 @@ class YALLMModel(nn.Module):
                  softmax=False):
         super(YALLMModel, self).__init__()
         # Defining the number of layers and the nodes in each layer
+        self.input_dim = input_dim
         self.hidden_dim = hidden_dim
-        self.labels = labels
         self.layer_dim = layer_dim
         self.output_dim = output_dim
         self.embedding = nn.Embedding(input_dim, hidden_dim)
@@ -40,7 +43,8 @@ class YALLMModel(nn.Module):
         self.log_softmax = nn.LogSoftmax(dim=2)
 
 
-    def forward(self, x = torch.randn(8, 5, 10)):
+    def forward(self, x):
+        x =  torch.randn(self.layer_dim, self.embed_dim, self.input_dim)
         if self.softmax:
             out, _ = self.lstm(x)
             # Take the last time step
@@ -75,21 +79,15 @@ class YALLMModel(nn.Module):
         self.train()
         step = 0
         for epoch in range(epochs):
-            for batch in loader:
+            for batch in loader: ##TODO: really use data next step !!!! ERROR
                 # Move batch to GPU
-                batch.to('cpu')
-                input_tensor = torch.randn(5, 5, 10)
+                input_tensor = torch.randn(self.layer_dim, self.embed_dim, self.input_dim, device='cpu', requires_grad=False)
                 input_tensor.to('cpu')
                 # Clear previous gradients
-                self.zero_grad()
+                optimizer.zero_grad()
 
                 # Forward pass
                 outputs = self(input_tensor)
-                # Backward pass
-
-
-                # Update weights
-                optimizer.step()
 
                 logits = self(input_tensor)
                 loss = criterion(logits, outputs)
@@ -103,17 +101,11 @@ class YALLMModel(nn.Module):
         torch.save(self.state_dict(), pkl_path)
 
     def save_model(self, model_path):
-        self.save_pretrained(model_path)
+        torch.save(self, model_path)
 
     @classmethod
     def load_model(cls, model_path):
-        return torch.load(model_path)
-
-    def load_state_dict(
-        self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False
-    ):
-        self.load_state_dict(state_dict, strict=strict, assign=assign)
-
+        return torch.load(model_path, map_location="cpu", weights_only=False)
 
 class YATokenizer:
     def __init__(self,  vocab=None, special_tokens=["<PAD>", "<UNK>"]):
@@ -194,6 +186,14 @@ class YATokenizer:
             return clean(token_ids)
         return [clean(seq) for seq in token_ids]
 
+class YAMultDataset:
+    def __init__(self, corpus, tokenizer_path):
+        self.corpus = corpus
+        self.tokenizer = YATokenizer.from_json(tokenizer_path)
+        self.encoded = tokenizer.encode(self.corpus, return_tensors="pt")
+        self.tokenized = torch.tensor(self.encoded, dtype=torch.long)
+    def tensor_dataset(self):
+        return TensorDataset(self.tokenized)
 
 class YALLMInferencePipeline:
     def __init__(self, model_path, tokenizer_path, config_path):
@@ -278,11 +278,22 @@ def tokenize_function(examples):
    # If using your custom tokenizer, ensure it supports list inputs
     return {"input_ids": [tokenizer.encode(text) for text in examples["text"]]}
 
+def tokenize_function_tensors(examples):
+   # This uses a pre-built tokenizer (like BERT) or your custom one
+   # If using your custom tokenizer, ensure it supports list inputs
+    return {"input_ids": [tokenizer.encode(text, return_tensors='pt') for text in examples["text"]]}
+
 if __name__ == '__main__':
     # --- Setup and Usage ---
-
+    _, model_base_path = get_model_path()
+    pt_model_path = os.path.join(model_base_path, 'YALLModel.pt')
     # Params: 10 input features, 32 hidden units, 2 stacked layers, 1 output value
-    model = YALLMModel(input_dim=10, hidden_dim=64, layer_dim=3, output_dim=1)
+    if (os.path.exists(pt_model_path)):
+        model = YALLMModel.load_model(model_path=pt_model_path)
+        print(f"Model loaded from: {pt_model_path}")
+    else:
+        model = YALLMModel(input_dim=10, hidden_dim=64, layer_dim=3, output_dim=1)
+        print("Model instance created")
 
     # Dummy Input: (Batch Size=8, Sequence Length=5, Features=10)
     random_input = torch.randn(8, 5, 10)
@@ -306,22 +317,28 @@ if __name__ == '__main__':
     print(input_vocab)
     tokenizer = YATokenizer()
     tokenizer.build_vocab(raw_data)
-
     dataset = YATextDataset(raw_data, tokenizer)
-    loader = DataLoader(dataset, batch_size=3)
-    model.train_model(loader)
-    # 1. Load your local data or a hub dataset
     ds = load_dataset("csv", data_files="./lang_words.csv")
-    #ds = load_dataset("imdb", split="train[:100]")  # Example with built-in data
+    ds_str = ds.data.__str__()
+    tokenized_ds = YAMultDataset(ds_str, "./YALLMModelSuite.json", )
+    t_ds = tokenized_ds.tensor_dataset()
+    loader = DataLoader(t_ds, batch_size=3)
 
-    # 3. Apply the mapping
-    tokenized_ds = ds.map(tokenize_function, batched=True)
-    tokenized_ds.set_format(type="torch", columns=["input_ids"])
+    model.train_model(loader)
+
+
+    model.save_model(os.path.join(pt_model_path))
+    model.save_state_dict(os.path.join(model_base_path, 'YALLModel.pkl'))
+    # 1. Load your local data or a hub dataset
+
+
+
 
     tokenizer.to_json(file_path="./YALLMModelSuite.json")
     # Usage
     tokenizer = YATokenizer.from_json(file_path="./YALLMModelSuite.json")
     encoded = tokenizer.encode("hello world here I am walking like a hurricane with ice in my eyes")
     decoded = tokenizer.decode(encoded)
-    print(encoded)
+    tokenized_ds = ds.map(tokenize_function, batched=True)
+    tokenized_ds.set_format(type="torch", columns=["input_ids"])
     print(decoded)
