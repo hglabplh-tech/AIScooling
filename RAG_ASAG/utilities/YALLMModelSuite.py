@@ -5,6 +5,8 @@ import torch.nn as nn
 import torch
 import json
 import re
+import pypdf
+import pdf2image
 from collections import Counter
 from datasets import load_dataset
 from torch import Tensor
@@ -26,9 +28,9 @@ class YALLSTMModel(nn.Module):
                  labels=[],
                  input_dim=10,
                  embed_dim = 10,
-                 hidden_dim=64,
+                 hidden_dim=256,
                  vocab_size=7000,
-                 layer_dim=4,
+                 layer_dim=256,
                  output_dim=1,
                  softmax=False):
         super(YALLSTMModel, self).__init__()
@@ -88,8 +90,7 @@ class YALLSTMModel(nn.Module):
             #logits = self.fc(out[:, -1, :])
             #return logits
             # Initializing hidden state (h0) and cell state (c0) with zeros
-            h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to(x.device)
-            c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to(x.device)
+
 
             b1 = []
             b2 = []
@@ -155,7 +156,7 @@ class YALLSTMModel(nn.Module):
     @classmethod
     def prepare_data_for_train(cls,  pt_model_path,  dataset):
         train_ds, val_ds, test_ds = cls.split_data(dataset)
-        train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=False)
+        train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
         val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
         test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False)
         label_size = 0
@@ -183,7 +184,7 @@ class YALLSTMModel(nn.Module):
         # 6. Inspect a Batch
         # ─────────────────────────────────────────
 
-        criterion = nn.MSELoss()  # Waits for Logits!
+        criterion = nn.CrossEntropyLoss() # Waits for Logits!
         optimizer = torch.optim.AdamW(self.parameters(), lr=LR)
         losses = []
         # Training Loop (simplified)
@@ -354,15 +355,18 @@ class YATokenizer:
             return clean(token_ids)
         return [clean(seq) for seq in token_ids]
 
-    def _clean_and_tokenize(self, text):
+    def clean_and_tokenize(self, text):
         """Lowercases text and splits it into words/punctuation fragments."""
-        text = text.lower()
+        if isinstance(text, str):
+            text = text.lower()
+        elif isinstance(text, list):
+            text = " ".join(text).lower()
         # Splits by spaces and isolates punctuation marks
         return re.findall(r"\w+|[^\w\s]", text)
 
     def __call__(self, text):
         """Tokenizes a single string, pads/truncates it, and generates masks."""
-        raw_tokens = self._clean_and_tokenize(text)
+        raw_tokens = self.clean_and_tokenize(text)
 
         # 1. Convert text tokens to unique Vocabulary IDs
         input_ids = [self.vocab.get(token, self.vocab[self.unk_token]) for token in raw_tokens]
@@ -476,20 +480,26 @@ class YATextDataset(Dataset):
 
 
  # 2. Define a processing function
-def tokenize_function(examples):
+def tokenize_function(values):
    # This uses a pre-built tokenizer (like BERT) or your custom one
    # If using your custom tokenizer, ensure it supports list inputs
-    return {"input_ids": [tokenizer.encode(text) for text in examples["text"]]}
+    return {"input_ids": [tokenizer.encode(text) for text in values["text"]]}
 
-def tokenize_function_tensors(examples):
+def tokenize_function_tensors(values):
    # This uses a pre-built tokenizer (like BERT) or your custom one
    # If using your custom tokenizer, ensure it supports list inputs
-    return {"input_ids": [tokenizer.encode(text, return_tensors='pt') for text in examples["text"]]}
+   if isinstance(values, list):
+       return {"input_ids": [tokenizer.encode(text, return_tensors='pt') for text in values["text"]]}
+   else:
+       return {"input_ids": [tokenizer.encode(text, return_tensors='pt') for text in values]}
+
 
 def get_tokenizer(tokenizer_path):
     if os.path.exists(tokenizer_path):
+        print('tokenizer loaded from {}'.format(tokenizer_path))
         tokenizer = YATokenizer.from_json(tokenizer_path)
     else:
+        print('tokenizer created new')
         tokenizer = YATokenizer()
     return tokenizer
 
@@ -503,38 +513,82 @@ def load_create_model(base_model_path, pt_model_path):
         print("Model instance created")
     return model
 
+def read_csv_as_plaintext(csv_file):
+    with open(csv_file, "r", encoding="utf-8") as f:
+        content = f.readlines().__str__()
+        f.close()
+    return content
+
+def concat_csv_files(csv_file, csv_target):
+    content = read_csv_as_plaintext(csv_file)
+    with open(csv_target, "a", encoding="utf-8") as f:
+        f.write(content)
+        f.close()
+
+
+def load_ds_and_tok(type, file_path, tokenizer):
+    ds = load_dataset(type, data_files=file_path)
+    ds_str = ds.data.__str__()
+    encoded = tokenizer(ds_str)
+    input_str = ''
+    for e in raw_data:
+        input_str += e
+    return ds, encoded, input_str
+
 
 if __name__ == '__main__':
     # --- Setup and Usage ---
+
     _, base_model_path = get_model_path()
     pt_model_path = os.path.join(base_model_path, 'YALSTMModel.pt')
+    tok_save_path = os.path.join(base_model_path, 'YALSTMTokenizer.json')
+    lang_words_path = os.path.join(base_model_path, 'vocab_input', 'lang_words.csv')
+    csv_data_ds_path = os.path.join(base_model_path, 'vocab_input', '*.csv')
     # Params: 10 input features, 32 hidden units, 2 stacked layers, 1 output value
     model = load_create_model(base_model_path, pt_model_path)
 
     # Dummy Input: (Batch Size=8, Sequence Length=5, Features=10)
 
-    dummy = torch.randn(3, 8, 5)
-    print(dummy)
-    # Forward pass
-
     # Usage of tokenizer
+    tokenizer = get_tokenizer(tokenizer_path=tok_save_path)
     vocab_data = []
-    raw_data = extract_doc_from_pdf(file_path="./test.pdf", as_doc=False)
-    vocab_data.append(raw_data)
-    raw_data = extract_doc_from_pdf(file_path="./test_two.pdf", as_doc=False)
-    vocab_data.append(raw_data)
-    raw_data = extract_doc_from_pdf(file_path="./test_three.pdf", as_doc=False)
-    vocab_data.append(raw_data)
-    raw_data = extract_doc_from_pdf(file_path="./test_four.pdf", as_doc=False)
-    vocab_data.append(raw_data)
-    input_vocab = vocab_data[0] + vocab_data[1] + vocab_data[2] + vocab_data[3]
-    print(input_vocab)
-    tokenizer = get_tokenizer("./YALLMModelSuite.json")
-    tokenizer.build_vocab(raw_data)
+    vocabs_lists = []
+    raw_data, raw_text = extract_doc_from_pdf(file_path="./test.pdf", as_doc=False)
+    raw_text = tokenizer.clean_and_tokenize(raw_text)
+    raw_data = tokenizer.clean_and_tokenize(raw_data)
+    vocab_data.extend(raw_text)
+    vocabs_lists.append(raw_data)
+
+    raw_data, raw_text  = extract_doc_from_pdf(file_path="./test_two.pdf", as_doc=False)
+    raw_text = tokenizer.clean_and_tokenize(raw_text)
+    raw_data = tokenizer.clean_and_tokenize(raw_data)
+    vocab_data.extend(raw_text)
+    vocabs_lists.append(raw_data)
+
+    raw_data, raw_text = extract_doc_from_pdf(file_path="./test_three.pdf", as_doc=False)
+    raw_text = tokenizer.clean_and_tokenize(raw_text)
+    raw_data = tokenizer.clean_and_tokenize(raw_data)
+    vocab_data.extend(raw_text)
+    vocabs_lists.append(raw_data)
+
+    raw_data, raw_text = extract_doc_from_pdf(file_path="./test_four.pdf", as_doc=False)
+    raw_text = tokenizer.clean_and_tokenize(raw_text)
+    raw_data = tokenizer.clean_and_tokenize(raw_data)
+    vocab_data.extend(raw_text)
+    vocabs_lists.append(raw_data)
+
+    csv_content = read_csv_as_plaintext(lang_words_path)
+    csv_content = tokenizer.clean_and_tokenize(csv_content)
+    vocab_data.extend(csv_content)
+    vocabs_lists.append([csv_content])
+    input_vocab = vocabs_lists[0] + vocabs_lists[1] + vocabs_lists[2] + vocabs_lists[3] + vocabs_lists[4]
+    complete_text = " ".join(vocab_data).lower()
+    print(complete_text)
+
+    tokenizer.build_vocab(vocab_data)
     dataset = YATextDataset(raw_data, tokenizer)
-    ds = load_dataset("csv", data_files="./lang_words.csv")
-    ds_str = ds.data.__str__()
-    encoded = tokenizer(ds_str)
+    # ds, encoded, input_str = load_ds_and_tok('csv', lang_words_path, tokenizer)
+    ds, encoded, input_str = load_ds_and_tok('csv', csv_data_ds_path, tokenizer)
     input_ids = encoded["input_ids"]  # (N, MAX_LEN)
     attention_mask = encoded["attention_mask"]
     print(input_ids)
@@ -548,18 +602,17 @@ if __name__ == '__main__':
     print(label_tensor)
     tokenized_ds =  TensorDataset(ids_tensor, attn_tensor, label_tensor)
     training_model, train_loader, val_loader, test_loader = YALLSTMModel.prepare_data_for_train(pt_model_path, tokenized_ds)
-    model.train_model(training_model,train_loader, val_loader, epochs=15)
+    model.train_model(training_model,train_loader, val_loader, epochs=30)
 
     model.save_model(base_model_path, os.path.join(pt_model_path))
     model.save_state_dict(os.path.join(base_model_path, 'YALSTMModel.pkl'))
-    # 1. Load your local data or a hub dataset
-
-
-
-
-    tokenizer.to_json(file_path="./YALLMModelSuite.json")
-    # Usage
-    tokenizer = get_tokenizer("./YALLMModelSuite.json")
+    write_to_json = input('Write tokenizer to disk (y/n): ')
+    if write_to_json == 'y':
+        write_tok_to_json = True
+    else:
+        write_tok_to_json = False
+    if write_tok_to_json:
+        tokenizer.to_json(file_path=tok_save_path)
     encoded = tokenizer.encode("hello world here I am walking like a hurricane with ice in my eyes")
     decoded = tokenizer.decode(encoded)
     tokenized_ds = ds.map(tokenize_function, batched=True)

@@ -1,15 +1,11 @@
 import os
 import uuid
-from typing import Any
 import torch as to
-import pandas as pd
-from boto3.dynamodb.types import LIST
 from torch import Tensor
 from torch.optim._multi_tensor import AdamW
 from torch.utils.data import TensorDataset, DataLoader
 
 from RAG_ASAG.utilities.RAGUtils import load_vector_db, get_db_base_path, get_model_path
-from RAG_ASAG.utilities.RAGUtils import get_app_key
 from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,

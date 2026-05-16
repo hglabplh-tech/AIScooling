@@ -84,10 +84,12 @@ def extract_doc_from_pdf(file_path, as_doc=True):
         # getting a specific page from the pdf file
         return documents
     else:
+        raw_text = ''
         text = []
         for page in range(page_count):
             text.append(documents[page].page_content)
-        return text
+            raw_text += documents[page].page_content
+        return text, raw_text
 
 def analyze_CSV(csv_file_path, query,parent):
     if parent:
