@@ -11,6 +11,8 @@ from collections import Counter
 from datasets import load_dataset
 from torch import Tensor
 from torch.utils.data import Dataset, DataLoader, TensorDataset, random_split
+from transformers.models.fsmt.modeling_fsmt import invert_mask
+
 from RAG_ASAG.utilities.RAGUtils import get_model_path, extract_csv_data
 from transformers import PretrainedConfig
 from RAG_ASAG.utilities.RAGUtils import extract_doc_from_pdf
@@ -25,13 +27,15 @@ class YALLSTMModel(nn.Module):
     def __init__(self,
                  input_ids=[],
                  attention_mask=[],
+                 embedding_dim=10,
                  labels=[],
                  input_dim=10,
-                 embed_dim = 10,
+                 embed_dim = 1,
                  hidden_dim=256,
                  vocab_size=7000,
                  layer_dim=256,
-                 output_dim=1,
+                 num_classes=1,
+                 padding_idx=0,
                  softmax=False):
         super(YALLSTMModel, self).__init__()
         # Defining the number of layers and the nodes in each layer
@@ -41,8 +45,9 @@ class YALLSTMModel(nn.Module):
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.layer_dim = layer_dim
-        self.output_dim = output_dim
-        self.embedding = nn.Embedding(input_dim, hidden_dim)
+        self.num_classes = num_classes
+        self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=padding_idx)
+        self.fc = nn.Linear(hidden_dim, num_classes)
         self.embed_dim = embed_dim
         self.vocab_size = vocab_size
         # LSTM Layer
@@ -50,83 +55,73 @@ class YALLSTMModel(nn.Module):
         self.lstm = nn.LSTM(input_dim, hidden_dim, layer_dim, batch_first=True, bidirectional=False)
 
         # Fully connected layer to convert hidden state to final output
-        self.fc = nn.Linear(hidden_dim, output_dim)
         self.softmax = softmax
-        self.log_softmax = nn.LogSoftmax(dim=2)
+        self.log_softmax = nn.LogSoftmax(dim=1)
 
+    def inject_vocab_size(self, vocab_size):
+        print(f"injecting vocab size is: {vocab_size}")
+        self.vocab_size = vocab_size
+        self.vocab_size = vocab_size
 
     @classmethod
-    def split_data(cls, dataset):
+    def split_data(cls, dataset, train_part_size=0.8, val_part_size=0.1, test_part_size=0.1):
         total = len(dataset)
-        train_size = int(0.7 * total)
-        val_size = int(0.15 * total)
-        test_size = total - train_size - val_size
+        train_size = int(train_part_size * total)
+
+        val_size = int(val_part_size * total)
+        test_size = int(test_part_size * total)
+
+        if (train_size + val_size + test_size > total):
+            train_part_size , val_part_size , test_part_size = 0.8, 1.0,1.0
+            train_size , val_size , test_size = int(train_part_size * total), int(val_part_size * total), int(test_part_size * total)
+
 
         train_ds, val_ds, test_ds = random_split(
             dataset,
             [train_size, val_size, test_size],
-            generator=torch.Generator().manual_seed(42),
+            generator=torch.Generator().manual_seed(42),  # greetings from 'hitchhikers from galaxy'
         )
         return train_ds, val_ds, test_ds
 
-    def forward(self, x: torch.Tensor,
-                mask: Optional[torch.Tensor] = None,
-                labels: Optional[torch.Tensor] = None
-                ):
-
-        fc_lin = nn.Linear(self.hidden_dim, self.output_dim)
-        if self.softmax:
-            out, _ = self.lstm(x)
-            # Take the last time step
-            logits = fc_lin(out[:, -1, :])
-
-            # Convert raw logits to probabilities [0, 1]
-            probs = self.log_softmax(logits)
-            return probs
-        else:
-            #x = self.embedding(x)
-            #out, _ = self.lstm(x)
-            # We give only back the last logits of the epoch
-            #logits = self.fc(out[:, -1, :])
-            #return logits
-            # Initializing hidden state (h0) and cell state (c0) with zeros
+    # ==========================================
+    # 4. RE-CONFIGURED TRAINING LOOP
+    # ==========================================
 
 
-            b1 = []
-            b2 = []
-            size = int(len(x) /2)
-            size_2 = len(x) - size
-            for i in range(len(x)):
-                if (i <= size):
-                    b1.append(x[i])
-                else:
-                    b2.append(x[i])
-            print(b1)
-            print(b2)
-            b1_tensor = self.make_list_tensors(b1, dtype=torch.float)
-            b2_tensor = self.make_list_tensors(b2, dtype=torch.float)
-            if (len(b2) == 0):
-                input_to_lstm = [b1_tensor]
-            else:
-                input_to_lstm = [b1_tensor, b2_tensor]
-            lstm_input = self.get_packed_tensors(input_to_lstm)
-            print(lstm_input)
-            fc_lin = nn.Linear(len(x), 1)
-            self.fc = fc_lin
-            #out: tensor of shape (batch_size, seq_length, hidden_dim)
-            lstm_call = nn.LSTM(input_size=1, hidden_size=len(x), batch_first=True, bidirectional=False)
-            packed_output, (hn, cn) = lstm_call(lstm_input)
-            output, output_lengths = pad_packed_sequence(packed_output, batch_first=True)
-            # We only need the last time step's output for the final prediction
-            # out[:, -1, :] extracts (self.batch_size, self.hidden_dim)
-            out = fc_lin(output[:,-1,  :])
-            return out
+
+    def forward(self, text_tensors, attention_mask):
+        # 1. Sum up attention mask horizontally to find true length of each sequence
+        lengths = attention_mask.sum().cpu()
+        print(f"FWD:Text Tensors -> {text_tensors}")
+        print(f"FWD:Attention Mask -> {attention_mask}")
+
+        # 2. Transform token indices to word embeddings
+        embedded = self.embedding(text_tensors).cpu()
+
+        # 3. Pack sequence tightly based on lengths to prevent LSTM from updating on padding zeroes
+        packed_embedded = self.get_packed_tensors([text_tensors])
+
+        # 4. Process sequence with LSTM
+        packed_out, _ = self.lstm(packed_embedded)
+
+        # 5. Restore full original padded context array
+        out, _ = nn.utils.rnn.pad_packed_sequence(
+                    packed_out, batch_first=True, total_length=text_tensors.size(1)
+            )
+
+        # 6. Target the exact index step where real words finished for every batch item
+        batch_indices = torch.arange(text_tensors.size(0), device=text_tensors.device)
+        last_word_indices = lengths.to(text_tensors.device) - 1
+        last_hidden_state = out[batch_indices, last_word_indices, :]
+
+        # 7. Convert sequence memory to logits mapping
+        return self.fc(last_hidden_state)
 
     @classmethod
     def get_packed_tensors(cls, sequences):
 
         # Track actual sequence lengths as a CPU integer tensor or list
-        lengths = torch.tensor([len(seq) for seq in sequences], dtype=torch.int64)
+        lengths = torch.tensor([len(seq) for seq in sequences], dtype=torch.long)
 
         # 2. PAD THE SEQUENCES FIRST
         # Puts them into a regular 3D tensor tensor of shape: (batch_size, max_seq_len, features)
@@ -155,7 +150,7 @@ class YALLSTMModel(nn.Module):
 
     @classmethod
     def prepare_data_for_train(cls,  pt_model_path,  dataset):
-        train_ds, val_ds, test_ds = cls.split_data(dataset)
+        train_ds, val_ds, test_ds = cls.split_data(dataset, train_part_size=0.7, val_part_size=0.1, test_part_size=0.2)
         train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
         val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
         test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False)
@@ -165,8 +160,6 @@ class YALLSTMModel(nn.Module):
             print("\n── Sample Batch ──────────────────────────")
             print("input_ids     :", ids.shape)  # (B, MAX_LEN)
             print("attention_mask:", mask.shape)  # (B, MAX_LEN)
-            print("labels        :", lbl)  # (B,)
-            label_size = lbl.size
             break
         print(f"Label size: {label_size}")
         model, config =YALLSTMModel.load_model(base_model_path, pt_model_path)
@@ -178,51 +171,36 @@ class YALLSTMModel(nn.Module):
                                          hidden_dim=self.hidden_dim,num_classes=num_classes, bidirectional=False)
         lstm_config.save_pretrained(model_base_path)
 
-    def train_model(self, model, train_loader: DataLoader[tuple[Tensor, ...]],val_loader: DataLoader[tuple[Tensor, ...]], epochs=5):
+    def train_model(self, model, train_loader: DataLoader[tuple[Tensor, ...]],
+                    val_loader: DataLoader[tuple[Tensor, ...]], epochs=5):
 
         # ─────────────────────────────────────────
         # 6. Inspect a Batch
         # ─────────────────────────────────────────
 
         criterion = nn.CrossEntropyLoss() # Waits for Logits!
-        optimizer = torch.optim.AdamW(self.parameters(), lr=LR)
+        optimizer = torch.optim.Adam(self.parameters(), lr=LR)
         losses = []
-        # Training Loop (simplified)
 
+        # ==========================================
+        # 4. RE-CONFIGURED TRAINING LOOP
+        # ==========================================
+
+        model.train()
         for epoch in range(epochs):
-            self.train()
             total_loss = 0.0
-            for ids, mask, lbl in train_loader:
-                ids, mask, lbl = ids.to(DEVICE), mask.to(DEVICE), lbl.to(DEVICE)
+            for batch_text, batch_mask, labels in train_loader:
+                batch_text, batch_mask, labels = batch_text.to(DEVICE), batch_mask.to(DEVICE), labels.to(DEVICE)
 
                 optimizer.zero_grad()
-                outputs = model(ids, mask, lbl)
-                print(outputs)
-                target = [[1]] * len(outputs)
-                #unpacked.append(items2)
-                target_tens = self.make_list_tensors(target, dtype=torch.float)
-                print(target_tens)
-                loss = criterion(outputs, target_tens)
+                logits = model(batch_text, batch_mask)
+                loss = criterion(logits, labels)
                 loss.backward()
                 optimizer.step()
 
-                total_loss += loss.item()
+                total_loss += loss.item() * batch_text.size(0)
 
-            avg_loss = total_loss / len(train_loader)
-
-            # ── Validate ──
-            model.eval()
-            correct, total = 0, 0
-            with torch.no_grad():
-                for ids, mask, lbl in val_loader:
-                    ids, mask, lbl = ids.to(DEVICE), mask.to(DEVICE), lbl.to(DEVICE)
-                    logits = model(ids, mask)
-                    preds = logits.argmax(dim=-1)
-                    correct += (preds == lbl).sum().item()
-                    total += lbl.size(0)
-
-            val_acc = correct / total if total > 0 else 0.0
-            print(f"Epoch {epoch + 1}/{epochs} | Loss: {avg_loss:.4f} | Val Acc: {val_acc:.2%}")
+            print(f"Epoch {epoch + 1} | Loss: {total_loss / len(dataset):.4f}")
 
     def save_state_dict(self, pkl_path):
         torch.save(self.state_dict(), pkl_path)
@@ -291,6 +269,7 @@ class YATokenizer:
             # Add special tokens first, then unique words
             self.vocab = {word: i for i, word in enumerate(unique_words)}
             self.id_to_word = {i: word for word, i in self.vocab.items()}
+        return len(self.vocab)
 
     # Assuming 'tokenizer' is the object from the previous example
     def to_json(self, file_path):
@@ -384,23 +363,16 @@ class YATokenizer:
             padding_length = self.max_length - len(input_ids)
             input_ids += [self.vocab[self.pad_token]] * padding_length
             attention_mask += [0] * padding_length
-            attention_mask = [attention_mask] # 0 marks padded positions to be ignored
+            attention_mask = [attention_mask]
+        # 0 marks padded positions to be ignored
+        labels = torch.randint(0, 2, (len(input_ids),))
 
         return {
             "input_ids": input_ids,
-            "attention_mask": attention_mask
+            "attention_mask": attention_mask,
+            "labels": labels
         }
 
-
-class YAMultDataset:
-    def __init__(self, corpus, tokenizer_path):
-        self.corpus = corpus
-        self.tokenizer = get_tokenizer(tokenizer_path)
-        self.encoded = tokenizer(self.corpus)
-
-
-    def tensor_dataset(self):
-        return TensorDataset(self.encoded)
 
 class YALLMInferencePipeline:
     def __init__(self, model_path, tokenizer_path, config_path):
@@ -474,7 +446,7 @@ class YATextDataset(Dataset):
 
         if return_tensors == "pt":
             # Returns a 1D tensor: [seq_len]
-            return torch.tensor(token_ids, dtype=torch.long)
+            return torch.tensor(token_ids, dtype=torch.float).to(DEVICE)
 
         return token_ids
 
@@ -503,13 +475,15 @@ def get_tokenizer(tokenizer_path):
         tokenizer = YATokenizer()
     return tokenizer
 
-def load_create_model(base_model_path, pt_model_path):
+def load_create_model(base_model_path, pt_model_path, vocab_size=7000):
     if (os.path.exists(pt_model_path)):
         model, config = YALLSTMModel.load_model(model_base_path=base_model_path, model_path=pt_model_path)
+        model.inject_vocab_size(vocab_size)
         print(f"Model loaded from: {pt_model_path}")
     else:
-        model = YALLSTMModel(input_dim=10, hidden_dim=64, layer_dim=3, output_dim=1)
-        model.save_model(os.path.join(pt_model_path))
+        model = YALLSTMModel(input_dim=10, hidden_dim=64, layer_dim=3, embed_dim=2,
+                             num_classes=1, vocab_size=vocab_size)
+        model.save_model(base_model_path, pt_model_path)
         print("Model instance created")
     return model
 
@@ -536,6 +510,16 @@ def load_ds_and_tok(type, file_path, tokenizer):
     return ds, encoded, input_str
 
 
+def prepare_for_ds(input_ids, attention_mask, label_tensor):
+    ids_tensor = torch.tensor(input_ids, dtype=torch.long)
+    attn_tensor = torch.tensor(attention_mask, dtype=torch.long)
+    print(f"Input IDS Tensor: {ids_tensor}")
+    print(f"Attention Mask Tensor: {attn_tensor}")
+    print(f"Labels Tensor: {label_tensor}")
+    tokenized_ds = TensorDataset(ids_tensor, attn_tensor, label_tensor)
+    return tokenized_ds
+
+
 if __name__ == '__main__':
     # --- Setup and Usage ---
 
@@ -545,7 +529,7 @@ if __name__ == '__main__':
     lang_words_path = os.path.join(base_model_path, 'vocab_input', 'lang_words.csv')
     csv_data_ds_path = os.path.join(base_model_path, 'vocab_input', '*.csv')
     # Params: 10 input features, 32 hidden units, 2 stacked layers, 1 output value
-    model = load_create_model(base_model_path, pt_model_path)
+
 
     # Dummy Input: (Batch Size=8, Sequence Length=5, Features=10)
 
@@ -585,22 +569,21 @@ if __name__ == '__main__':
     complete_text = " ".join(vocab_data).lower()
     print(complete_text)
 
-    tokenizer.build_vocab(vocab_data)
+    vocab_size = tokenizer.build_vocab(vocab_data)
+    model = load_create_model(base_model_path, pt_model_path, vocab_size=vocab_size)
+
     dataset = YATextDataset(raw_data, tokenizer)
     # ds, encoded, input_str = load_ds_and_tok('csv', lang_words_path, tokenizer)
     ds, encoded, input_str = load_ds_and_tok('csv', csv_data_ds_path, tokenizer)
     input_ids = encoded["input_ids"]  # (N, MAX_LEN)
     attention_mask = encoded["attention_mask"]
-    print(input_ids)
-    print(attention_mask)
-    labels = [0] * len(input_ids)
-    label_tensor = torch.tensor(labels)  # (N,)
-    ids_tensor = torch.tensor(input_ids)
-    attn_tensor = torch.tensor(attention_mask)
-    print(ids_tensor)
-    print(attn_tensor)
-    print(label_tensor)
-    tokenized_ds =  TensorDataset(ids_tensor, attn_tensor, label_tensor)
+    labels_tensor = encoded["labels"]
+    print(f"Input IDS: {input_ids}")
+    print(f"Attention Mask: {attention_mask}")
+    print(f"Labels: {labels_tensor}")
+    tokenized_ds = prepare_for_ds(input_ids,
+                                  attention_mask,
+                                  labels_tensor)
     training_model, train_loader, val_loader, test_loader = YALLSTMModel.prepare_data_for_train(pt_model_path, tokenized_ds)
     model.train_model(training_model,train_loader, val_loader, epochs=30)
 
