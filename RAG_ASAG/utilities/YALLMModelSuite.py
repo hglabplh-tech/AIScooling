@@ -59,7 +59,7 @@ class YALLSTMModel(nn.Module):
         self.log_softmax = nn.LogSoftmax(dim=1)
 
     def inject_vocab_size(self, vocab_size):
-        print(f"injecting vocab size is: {vocab_size}")
+        debug_print(f"injecting vocab size is: {vocab_size}")
         self.vocab_size = vocab_size
         self.vocab_size = vocab_size
 
@@ -92,17 +92,17 @@ class YALLSTMModel(nn.Module):
     def forward(self, text_tensors, attention_mask):
         # 1. Sum up attention mask horizontally to find true length of each sequence
         lengths = attention_mask.sum().cpu()
-        print(f"FWD:Text Tensors -> {text_tensors}")
-        print(f"FWD:Attention Mask -> {attention_mask}")
+        debug_print(f"FWD:Text Tensors -> {text_tensors}")
+        debug_print(f"FWD:Attention Mask -> {attention_mask}")
 
         # 2. Transform token indices to word embeddings
         embedded = self.embedding(text_tensors).cpu()
-        print(f"Embedded Values: {embedded}")
-        print(f"Embedded Values Shape: {embedded.size()}")
+        debug_print(f"Embedded Values: {embedded}")
+        debug_print(f"Embedded Values Shape: {embedded.size()}")
         embedded_size = embedded.size()
         # 3. Pack sequence tightly based on lengths to prevent LSTM from updating on padding zeroes
         packed_embedded = self.get_packed_tensors(embedded)
-        print(f"Packed embedded: {packed_embedded}")
+        debug_print(f"Packed embedded: {packed_embedded}")
         # in between initialize LSTM again
         self.lstm = nn.LSTM(1, embedded_size[0], embedded_size[1], batch_first=True, bidirectional=False)
         # 4. Process sequence with LSTM
@@ -117,13 +117,13 @@ class YALLSTMModel(nn.Module):
         batch_indices = torch.arange(embedded.size(0), device=embedded.device)
         last_word_indices = lengths.to(embedded.device) - 1
         last_hidden_state = out[batch_indices, last_word_indices, :]
-        print(f"batch indices: {batch_indices}")
-        print(f"last word indices: {last_word_indices}")
-        print(f"last hidden state: {last_hidden_state}")
+        debug_print(f"batch indices: {batch_indices}")
+        debug_print(f"last word indices: {last_word_indices}")
+        debug_print(f"last hidden state: {last_hidden_state}")
         # 7. Convert sequence memory to logits mapping
         x = batch_indices.size()[0]
         y = last_word_indices + 1
-        print(f"batch len: {x} - wordslen: {y}")
+        debug_print(f"batch len: {x} - wordslen: {y}")
         self.fc = nn.Linear(x, y)
         return self.fc(last_hidden_state)
 
@@ -155,7 +155,7 @@ class YALLSTMModel(nn.Module):
         for i in range(len(raw_list)):
             indexes.append(i)
         list_tensor = list_tensor[torch.tensor(indexes, dtype=torch.long)]
-        print(list_tensor)
+        debug_print(list_tensor)
         return list_tensor
 
     @classmethod
@@ -167,11 +167,11 @@ class YALLSTMModel(nn.Module):
         label_size = 0
         for batch in train_loader:
             ids, mask, lbl = batch
-            print("\n── Sample Batch ──────────────────────────")
-            print("input_ids     :", ids.shape)  # (B, MAX_LEN)
-            print("attention_mask:", mask.shape)  # (B, MAX_LEN)
+            debug_print("\n── Sample Batch ──────────────────────────")
+            debug_print(f"input_ids     :{ids.shape}")  # (B, MAX_LEN)
+            debug_print(f"attention_mask: {mask.shape}")  # (B, MAX_LEN)
             break
-        print(f"Label size: {label_size}")
+        debug_print(f"Label size: {label_size}")
         model, config =YALLSTMModel.load_model(base_model_path, pt_model_path)
         return model, train_loader, val_loader, test_loader
 
@@ -478,10 +478,10 @@ def tokenize_function_tensors(values):
 
 def get_tokenizer(tokenizer_path):
     if os.path.exists(tokenizer_path):
-        print('tokenizer loaded from {}'.format(tokenizer_path))
+        debug_print('tokenizer loaded from {}'.format(tokenizer_path))
         tokenizer = YATokenizer.from_json(tokenizer_path)
     else:
-        print('tokenizer created new')
+        debug_print('tokenizer created new')
         tokenizer = YATokenizer()
     return tokenizer
 
@@ -523,12 +523,16 @@ def load_ds_and_tok(type, file_path, tokenizer):
 def prepare_for_ds(input_ids, attention_mask, label_tensor):
     ids_tensor = torch.tensor(input_ids, dtype=torch.long)
     attn_tensor = torch.tensor(attention_mask, dtype=torch.long)
-    print(f"Input IDS Tensor: {ids_tensor}")
-    print(f"Attention Mask Tensor: {attn_tensor}")
-    print(f"Labels Tensor: {label_tensor}")
+    debug_print(f"Input IDS Tensor: {ids_tensor}")
+    debug_print(f"Attention Mask Tensor: {attn_tensor}")
+    debug_print(f"Labels Tensor: {label_tensor}")
     tokenized_ds = TensorDataset(ids_tensor, attn_tensor, label_tensor)
     return tokenized_ds
 
+DEBUG = False
+def debug_print(message):
+    if DEBUG:
+        print(message)
 
 if __name__ == '__main__':
     # --- Setup and Usage ---
@@ -588,9 +592,9 @@ if __name__ == '__main__':
     input_ids = encoded["input_ids"]  # (N, MAX_LEN)
     attention_mask = encoded["attention_mask"]
     labels_tensor = encoded["labels"]
-    print(f"Input IDS: {input_ids}")
-    print(f"Attention Mask: {attention_mask}")
-    print(f"Labels: {labels_tensor}")
+    debug_print(f"Input IDS: {input_ids}")
+    debug_print(f"Attention Mask: {attention_mask}")
+    debug_print(f"Labels: {labels_tensor}")
     tokenized_ds = prepare_for_ds(input_ids,
                                   attention_mask,
                                   labels_tensor)
@@ -606,5 +610,6 @@ if __name__ == '__main__':
         write_tok_to_json = False
     if write_tok_to_json:
         tokenizer.to_json(file_path=tok_save_path)
-    encoded = tokenizer.encode("hello world here I am walking like a hurricane with ice in my eyes")
+    encoded = tokenizer.encode("hello world here I am walking like a hurricane with ice in my eyes".lower())
     decoded = tokenizer.decode(encoded)
+    print(decoded)
