@@ -97,24 +97,34 @@ class YALLSTMModel(nn.Module):
 
         # 2. Transform token indices to word embeddings
         embedded = self.embedding(text_tensors).cpu()
-
+        print(f"Embedded Values: {embedded}")
+        print(f"Embedded Values Shape: {embedded.size()}")
+        embedded_size = embedded.size()
         # 3. Pack sequence tightly based on lengths to prevent LSTM from updating on padding zeroes
-        packed_embedded = self.get_packed_tensors([text_tensors])
-
+        packed_embedded = self.get_packed_tensors(embedded)
+        print(f"Packed embedded: {packed_embedded}")
+        # in between initialize LSTM again
+        self.lstm = nn.LSTM(1, embedded_size[0], embedded_size[1], batch_first=True, bidirectional=False)
         # 4. Process sequence with LSTM
         packed_out, _ = self.lstm(packed_embedded)
 
         # 5. Restore full original padded context array
         out, _ = nn.utils.rnn.pad_packed_sequence(
-                    packed_out, batch_first=True, total_length=text_tensors.size(1)
+                    packed_out, batch_first=True #, total_length=packed_out.size(-1)
             )
 
         # 6. Target the exact index step where real words finished for every batch item
-        batch_indices = torch.arange(text_tensors.size(0), device=text_tensors.device)
-        last_word_indices = lengths.to(text_tensors.device) - 1
+        batch_indices = torch.arange(embedded.size(0), device=embedded.device)
+        last_word_indices = lengths.to(embedded.device) - 1
         last_hidden_state = out[batch_indices, last_word_indices, :]
-
+        print(f"batch indices: {batch_indices}")
+        print(f"last word indices: {last_word_indices}")
+        print(f"last hidden state: {last_hidden_state}")
         # 7. Convert sequence memory to logits mapping
+        x = batch_indices.size()[0]
+        y = last_word_indices + 1
+        print(f"batch len: {x} - wordslen: {y}")
+        self.fc = nn.Linear(x, y)
         return self.fc(last_hidden_state)
 
     @classmethod
@@ -126,7 +136,7 @@ class YALLSTMModel(nn.Module):
         # 2. PAD THE SEQUENCES FIRST
         # Puts them into a regular 3D tensor tensor of shape: (batch_size, max_seq_len, features)
         # Here features = 1 for simple scalar lists
-        padded_seqs =nn.utils.rnn.pad_sequence(sequences, batch_first=True, padding_value=0.0)
+        padded_seqs =nn.utils.rnn.pad_sequence(sequences, batch_first=True, padding_value=0)
         padded_seqs = padded_seqs.unsqueeze(-1)  # Shape becomes: (3, 5, 1)
 
         # 3. PACK THE PADDED SEQUENCES
@@ -225,7 +235,7 @@ class  YALLSTMModelConfig(PretrainedConfig):
         embedding_dim=256,
         hidden_dim=512,
         num_layers=2,
-        num_classes=3,
+        num_classes=1,
         dropout=0.2,
         bidirectional=True,
         **kwargs
@@ -446,7 +456,7 @@ class YATextDataset(Dataset):
 
         if return_tensors == "pt":
             # Returns a 1D tensor: [seq_len]
-            return torch.tensor(token_ids, dtype=torch.float).to(DEVICE)
+            return torch.tensor(token_ids, dtype=torch.long).to(DEVICE)
 
         return token_ids
 
@@ -567,7 +577,7 @@ if __name__ == '__main__':
     vocabs_lists.append([csv_content])
     input_vocab = vocabs_lists[0] + vocabs_lists[1] + vocabs_lists[2] + vocabs_lists[3] + vocabs_lists[4]
     complete_text = " ".join(vocab_data).lower()
-    print(complete_text)
+
 
     vocab_size = tokenizer.build_vocab(vocab_data)
     model = load_create_model(base_model_path, pt_model_path, vocab_size=vocab_size)
@@ -598,6 +608,3 @@ if __name__ == '__main__':
         tokenizer.to_json(file_path=tok_save_path)
     encoded = tokenizer.encode("hello world here I am walking like a hurricane with ice in my eyes")
     decoded = tokenizer.decode(encoded)
-    tokenized_ds = ds.map(tokenize_function, batched=True)
-    tokenized_ds.set_format(type="torch", columns=["input_ids"])
-    print(decoded)
