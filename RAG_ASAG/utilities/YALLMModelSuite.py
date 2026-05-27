@@ -61,7 +61,10 @@ class YALLSTMModel(nn.Module):
     def inject_vocab_size(self, vocab_size):
         debug_print(f"injecting vocab size is: {vocab_size}")
         self.vocab_size = vocab_size
-        self.vocab_size = vocab_size
+        return self.get_vocab_size()
+
+    def get_vocab_size(self):
+         return self.vocab_size
 
     @classmethod
     def split_data(cls, dataset, train_part_size=0.8, val_part_size=0.1, test_part_size=0.1):
@@ -101,28 +104,31 @@ class YALLSTMModel(nn.Module):
         debug_print(f"Embedded Values Shape: {embedded.size()}")
         embedded_size = embedded.size()
         # 3. Pack sequence tightly based on lengths to prevent LSTM from updating on padding zeroes
+        #packed_embedded = nn.utils.rnn.pack_padded_sequence(
+         #   embedded, lengths, batch_first=True, enforce_sorted=False
+        #)
         packed_embedded = self.get_packed_tensors(embedded)
         debug_print(f"Packed embedded: {packed_embedded}")
         # in between initialize LSTM again
-        self.lstm = nn.LSTM(1, embedded_size[0], embedded_size[1], batch_first=True, bidirectional=False)
+        self.lstm = nn.LSTM(self.num_classes, embedded_size[0], embedded_size[1], batch_first=True, bidirectional=False)
         # 4. Process sequence with LSTM
-        packed_out, _ = self.lstm(packed_embedded)
+        packed_out, (hidden, cell) = self.lstm(packed_embedded)
 
         # 5. Restore full original padded context array
-        out, _ = nn.utils.rnn.pad_packed_sequence(
+        out, lens = nn.utils.rnn.pad_packed_sequence(
                     packed_out, batch_first=True #, total_length=packed_out.size(-1)
             )
-
+        print(lens)
         # 6. Target the exact index step where real words finished for every batch item
-        batch_indices = torch.arange(embedded.size(0), device=embedded.device)
-        last_word_indices = lengths.to(embedded.device) - 1
+        batch_indices = torch.arange(text_tensors.size(0), device=DEVICE)
+        last_word_indices = lengths.to(DEVICE) - 1
         last_hidden_state = out[batch_indices, last_word_indices, :]
         debug_print(f"batch indices: {batch_indices}")
         debug_print(f"last word indices: {last_word_indices}")
         debug_print(f"last hidden state: {last_hidden_state}")
         # 7. Convert sequence memory to logits mapping
         x = batch_indices.size()[0]
-        y = last_word_indices + 1
+        y = lengths.to(DEVICE)
         debug_print(f"batch len: {x} - wordslen: {y}")
         self.fc = nn.Linear(x, y)
         return self.fc(last_hidden_state)
@@ -168,8 +174,10 @@ class YALLSTMModel(nn.Module):
         for batch in train_loader:
             ids, mask, lbl = batch
             debug_print("\n── Sample Batch ──────────────────────────")
-            debug_print(f"input_ids     :{ids.shape}")  # (B, MAX_LEN)
-            debug_print(f"attention_mask: {mask.shape}")  # (B, MAX_LEN)
+            debug_print(f"input_ids shape :{ids.shape}")  # (B, MAX_LEN)
+            debug_print(f"attention_mask shape : {mask.shape}")  # (B, MAX_LEN)
+            debug_print(f"attention_mask shape : {lbl.shape}")  # (B, MAX_LEN)
+            label_size = lbl.shape[0]
             break
         debug_print(f"Label size: {label_size}")
         model, config =YALLSTMModel.load_model(base_model_path, pt_model_path)
@@ -250,7 +258,13 @@ class  YALLSTMModelConfig(PretrainedConfig):
         self.bidirectional = bidirectional
 
 class YATokenizer:
-    def __init__(self,  vocab=None, special_tokens=["<PAD>", "<UNK>"],max_length=10, pad_token="<PAD>", unk_token="<UNK>"):
+    def __init__(self,  vocab=None,
+                 max_length=10,
+                 pad_token="<PAD>",
+                 unk_token="<UNK>",
+                 eos_token="<EOS>",
+                 bos_token="<BOS>",
+                 special_tokens = ["<PAD>", "<UNK>","<EOS>", "<BOS>"]):
         self.max_length = max_length
         self.vocab = vocab
         self.id_to_word = {}
@@ -258,6 +272,8 @@ class YATokenizer:
         self.max_length = max_length
         self.pad_token = pad_token
         self.unk_token = unk_token
+        self.bos_token = bos_token
+        self.eos_token = eos_token
 
     def build_vocab(self, corpus, append=False):
         # Flatten all text and count word frequencies
@@ -300,7 +316,7 @@ class YATokenizer:
         return instance
 
     def encode(self, text, return_tensors="pt"):
-        unk_id = self.vocab.get("<UNK>")
+        unk_id = self.vocab.get(self.unk_token)
         ids = [self.vocab.get(word, unk_id) for word in text.split()]
         if return_tensors == "pt":
             # Returns a 1D tensor: [seq_len]
@@ -309,7 +325,7 @@ class YATokenizer:
 
     def batch_encode(self, texts, max_len=10):
         batch_ids = []
-        pad_id = self.vocab.get("<PAD>", 0)
+        pad_id = self.vocab.get(self.pad_token, 0)
 
         for text in texts:
             ids = self.encode(text, return_tensors='none')  # get list
@@ -354,6 +370,7 @@ class YATokenizer:
         return re.findall(r"\w+|[^\w\s]", text)
 
     def __call__(self, text):
+    #    debug_print(self.vocab.keys())
         """Tokenizes a single string, pads/truncates it, and generates masks."""
         raw_tokens = self.clean_and_tokenize(text)
 
@@ -435,6 +452,57 @@ class YALLMInferencePipeline:
         return predicted_text
 
 
+class YAChatClient:
+    def __init__(self,
+                 config_path: str =None,
+                 model_name='tiny'):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        _, base_model_path = get_model_path()
+        pt_model_path, dictionary_path, tok_save_path, lang_words_path, csv_data_ds_path =  (
+            get_model_paths(model_postfix=model_name,
+                            base_model_path=base_model_path))
+        self.tokenizer = YATokenizer.from_json(tok_save_path)
+        self.model = load_create_model(base_model_path, pt_model_path, vocab_size=vocab_size)
+
+    def __call__(self, prompt, max_new_tokens: int = 30):
+        model.eval()
+        encoded = tokenizer(prompt)
+        ids = encoded["input_ids"]
+        attention_mask = encoded["attention_mask"]
+
+
+        generated = ids.copy()
+        attn_mask = attention_mask.copy()
+        x = torch.tensor([generated], dtype=torch.long).to(DEVICE)
+        y = torch.tensor([attn_mask], dtype=torch.long).to(DEVICE)
+        for _ in range(max_new_tokens):
+            logits = model(x, y)
+            next_token_logits = logits[:, -1, :]
+            next_token = torch.argmax(
+                next_token_logits,
+                dim=-1).item()
+
+
+            generated.append(next_token)
+            attn_mask.append(1)
+            # TODO:think about and also about attention mask look if forward in model
+            # TODO: has to be enhanced by mask / no mask
+            if next_token == tokenizer.vocab[tokenizer.eos_token]:
+                break
+            x = torch.tensor(
+                [generated],
+                dtype=torch.long
+                ).to(DEVICE)
+
+            y = torch.tensor(
+                [generated],
+                dtype=torch.long
+            ).to(DEVICE)
+
+
+        return tokenizer.decode(generated)
+
 class YATextDataset(Dataset):
     def __init__(self, texts, tokenizer, max_len=10):
         self.texts = texts
@@ -497,6 +565,8 @@ def load_create_model(base_model_path, pt_model_path, vocab_size=7000):
         print("Model instance created")
     return model
 
+
+
 def read_csv_as_plaintext(csv_file):
     with open(csv_file, "r", encoding="utf-8") as f:
         content = f.readlines().__str__()
@@ -511,6 +581,8 @@ def concat_csv_files(csv_file, csv_target):
 
 
 def load_ds_and_tok(type, file_path, tokenizer):
+    debug_print("Loading dataset")
+    debug_print("file_path: {}".format(file_path))
     ds = load_dataset(type, data_files=file_path)
     ds_str = ds.data.__str__()
     encoded = tokenizer(ds_str)
@@ -529,19 +601,29 @@ def prepare_for_ds(input_ids, attention_mask, label_tensor):
     tokenized_ds = TensorDataset(ids_tensor, attn_tensor, label_tensor)
     return tokenized_ds
 
-DEBUG = False
+DEBUG = True
 def debug_print(message):
     if DEBUG:
         print(message)
+
+
+def get_model_paths(model_postfix, base_model_path):
+    pt_model_name = f"YALSTMModel_{model_postfix}.pt"
+    dictionary_name = f"YALSTMDictionary_{model_postfix}.pt"
+    tok_save_model_name = f"YALSTMTokenizer_{model_postfix}.json"
+    pt_model_path = os.path.join(base_model_path, pt_model_name)
+    dictionary_path = os.path.join(base_model_path, dictionary_name)
+    tok_save_path = os.path.join(base_model_path, tok_save_model_name)
+    lang_words_path = os.path.join(base_model_path, 'vocab_input', 'lang_words.csv')
+    csv_data_ds_path = os.path.join(base_model_path, 'vocab_input_batch', '*.csv')
+    debug_print(f"The paths\nThe model path: {pt_model_path}\nThe dictionary path:{dictionary_path}\nThe tokenizer path: {tok_save_path}\nThe language words path: {lang_words_path}")
+    return  pt_model_path, dictionary_path, tok_save_path, lang_words_path, csv_data_ds_path
 
 if __name__ == '__main__':
     # --- Setup and Usage ---
 
     _, base_model_path = get_model_path()
-    pt_model_path = os.path.join(base_model_path, 'YALSTMModel.pt')
-    tok_save_path = os.path.join(base_model_path, 'YALSTMTokenizer.json')
-    lang_words_path = os.path.join(base_model_path, 'vocab_input', 'lang_words.csv')
-    csv_data_ds_path = os.path.join(base_model_path, 'vocab_input', '*.csv')
+    pt_model_path, dictionary_path, tok_save_path, lang_words_path, csv_data_ds_path = get_model_paths(model_postfix="tiny", base_model_path=base_model_path)
     # Params: 10 input features, 32 hidden units, 2 stacked layers, 1 output value
 
 
@@ -575,11 +657,24 @@ if __name__ == '__main__':
     vocab_data.extend(raw_text)
     vocabs_lists.append(raw_data)
 
+    raw_data, raw_text = extract_doc_from_pdf(file_path="./test_five.pdf", as_doc=False)
+    raw_text = tokenizer.clean_and_tokenize(raw_text)
+    raw_data = tokenizer.clean_and_tokenize(raw_data)
+    vocab_data.extend(raw_text)
+    vocabs_lists.append(raw_data)
+
+    raw_data, raw_text = extract_doc_from_pdf(file_path="./test_six.pdf", as_doc=False)
+    raw_text = tokenizer.clean_and_tokenize(raw_text)
+    raw_data = tokenizer.clean_and_tokenize(raw_data)
+    vocab_data.extend(raw_text)
+    vocabs_lists.append(raw_data)
+
     csv_content = read_csv_as_plaintext(lang_words_path)
     csv_content = tokenizer.clean_and_tokenize(csv_content)
     vocab_data.extend(csv_content)
     vocabs_lists.append([csv_content])
-    input_vocab = vocabs_lists[0] + vocabs_lists[1] + vocabs_lists[2] + vocabs_lists[3] + vocabs_lists[4]
+    input_vocab = (vocabs_lists[0] + vocabs_lists[1] + vocabs_lists[2] + vocabs_lists[3] +
+                   vocabs_lists[4] + vocabs_lists[5] + vocabs_lists[6])
     complete_text = " ".join(vocab_data).lower()
 
 
@@ -599,10 +694,10 @@ if __name__ == '__main__':
                                   attention_mask,
                                   labels_tensor)
     training_model, train_loader, val_loader, test_loader = YALLSTMModel.prepare_data_for_train(pt_model_path, tokenized_ds)
-    model.train_model(training_model,train_loader, val_loader, epochs=30)
+    model.train_model(training_model,train_loader, val_loader, epochs=5)
 
     model.save_model(base_model_path, os.path.join(pt_model_path))
-    model.save_state_dict(os.path.join(base_model_path, 'YALSTMModel.pkl'))
+    model.save_state_dict(dictionary_path)
     write_to_json = input('Write tokenizer to disk (y/n): ')
     if write_to_json == 'y':
         write_tok_to_json = True
@@ -610,6 +705,9 @@ if __name__ == '__main__':
         write_tok_to_json = False
     if write_tok_to_json:
         tokenizer.to_json(file_path=tok_save_path)
-    encoded = tokenizer.encode("hello world here I am walking like a hurricane with ice in my eyes".lower())
-    decoded = tokenizer.decode(encoded)
+    encoded = tokenizer("hello world here I am walking like a hurricane with ice in my eyes".lower())
+    decoded = tokenizer.decode(encoded["input_ids"])
     print(decoded)
+    chat = YAChatClient(model_name='tiny')
+    result = chat("Who is Hitler", max_new_tokens=40)
+    print(result)
