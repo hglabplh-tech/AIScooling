@@ -270,10 +270,7 @@ class YATokenizer:
         self.id_to_word = {}
         self.special_tokens = special_tokens
         self.max_length = max_length
-        self.pad_id = vocab["<PAD>"]
-        self.unk_id = vocab["<UNK>"]
-        self.bos_id = vocab["<BOS>"]
-        self.eos_id = vocab["<EOS>"]
+
 
         self.pad_token = "<PAD>"
         self.unk_token = "<UNK>"
@@ -380,9 +377,10 @@ class YATokenizer:
         raw_tokens = self.clean_and_tokenize(text)
 
         # 1. Convert text tokens to unique Vocabulary IDs
-        input_ids = [self.vocab.get(token, self.unk_id) for token in raw_tokens]
+        input_ids = [self.vocab.get(token, self.vocab[self.unk_token]) for token in raw_tokens]
 
         # 2. Create the raw attention mask (1 for real data tokens)
+
         attention_mask = [1] * len(input_ids)
 
         # 3. Handle Truncation (if sequence is too long)
@@ -393,7 +391,7 @@ class YATokenizer:
         # 4. Handle Padding (if sequence is too short)
         else:
             padding_length = self.max_length - len(input_ids)
-            input_ids += [self.pad_id] * padding_length
+            input_ids += [self.vocab[self.pad_token]] * padding_length
             attention_mask += [0] * padding_length
             attention_mask = [attention_mask]
         # 0 marks padded positions to be ignored
@@ -402,7 +400,7 @@ class YATokenizer:
         return {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
-            "labels": labels
+            "target": labels
         }
 
 
@@ -500,6 +498,7 @@ class YALSTMChatModel(nn.Module):
         logits = self.output(last_hidden)
 
         return logits
+
     @classmethod
     def train_model(cls, tokenizer, dataset, epochs=300):
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -541,7 +540,7 @@ class YALSTMChatModel(nn.Module):
         print("Gespeichert: vocab.json")
 
     @classmethod
-    def generate(cls, model, tokenizer, prompt, max_new_tokens=30, temperature=0.8):
+    def generate(cls, model, tokenizer, prompt, max_new_tokens=30, temperature=0.8, seq_len=12):
         device = next(model.parameters()).device
 
         model.eval()
@@ -553,12 +552,12 @@ class YALSTMChatModel(nn.Module):
 
         with torch.no_grad():
             for _ in range(max_new_tokens):
-                context = ids[-SEQ_LEN:]#TODO: SEQ_LEN
+                context = ids[-seq_len:]#TODO: SEQ_LEN
 
-                while len(context) < SEQ_LEN: #TODO: SEQ_LEN
-                    context.insert(0, tokenizer.pad_id)
+                while len(context) < seq_len: #TODO: SEQ_LEN
+                    context.insert(0,  tokenizer.vocab[tokenizer.pad_token])
 
-                attention_mask = [0 if x == tokenizer.pad_id else 1 for x in context]
+                attention_mask = [0 if x == tokenizer.vocab[tokenizer.pad_token] else 1 for x in context]
 
                 input_ids = torch.tensor([context], dtype=torch.long).to(device)
                 mask = torch.tensor([attention_mask], dtype=torch.float32).to(device)
@@ -571,13 +570,13 @@ class YALSTMChatModel(nn.Module):
 
                 ids.append(next_id)
 
-                if next_id == tokenizer.eos_id:
+                if next_id ==  tokenizer.vocab[tokenizer.eos_token]:
                     break
 
         return tokenizer.decode(ids)
 
 class YAAutoregressiveDataset(Dataset):
-    def __init__(self, texts, tokenizer, seq_len):
+    def __init__(self, texts, tokenizer, seq_len=12):
         self.samples = []
         self.pad_id = tokenizer.pad_id
 
@@ -793,7 +792,7 @@ if __name__ == '__main__':
     ds, encoded, input_str = load_ds_and_tok('csv', csv_data_ds_path, tokenizer)
     input_ids = encoded["input_ids"]  # (N, MAX_LEN)
     attention_mask = encoded["attention_mask"]
-    labels_tensor = encoded["labels"]
+    labels_tensor = encoded["target"]
     debug_print(f"Input IDS: {input_ids}")
     debug_print(f"Attention Mask: {attention_mask}")
     debug_print(f"Labels: {labels_tensor}")
@@ -817,5 +816,5 @@ if __name__ == '__main__':
     print(decoded)
     # TODO: correct this all
     chat = YALSTMChatModel(vocab_size=vocab_size)
-    result = YALSTMChatModel.generate(chat, tokenizer, "Who is Hitler", max_new_tokens=40)
+    result = YALSTMChatModel.generate(chat, tokenizer, "Who was Winston Churchill ?", max_new_tokens=40)
     print(result)
