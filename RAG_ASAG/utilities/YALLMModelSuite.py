@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Mapping, Any, Optional
 
 import torch.nn as nn
@@ -15,7 +16,7 @@ from transformers.models.fsmt.modeling_fsmt import invert_mask
 
 from RAG_ASAG.utilities.RAGUtils import get_model_path, extract_csv_data
 from transformers import PretrainedConfig
-from RAG_ASAG.utilities.RAGUtils import extract_doc_from_pdf
+from RAG_ASAG.utilities.RAGUtils import extract_doc_from_pdf, extract_doc_from_text, read_all_docs
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, unpack_sequence
 
 #Some constant values
@@ -677,6 +678,12 @@ def read_csv_as_plaintext(csv_file):
         f.close()
     return content
 
+def read_csv_as_plainbytes(csv_file):
+    with open(csv_file, "rb") as f:
+        content = f.readlines().__str__()
+        f.close()
+    return content
+
 def concat_csv_files(csv_file, csv_target):
     content = read_csv_as_plaintext(csv_file)
     with open(csv_target, "a", encoding="utf-8") as f:
@@ -813,6 +820,12 @@ if __name__ == '__main__':
         tokenizer.to_json(file_path=tok_save_path)
     encoded = tokenizer("hello world here I am walking like a hurricane with ice in my eyes".lower())
     decoded = tokenizer.decode(encoded["input_ids"])
+    base = os.path.join(Path.home(), 'collections', 'chat_dialog')
+    docs = []
+    for file in os.listdir(base):
+        filep = os.path.join(base, file)
+        docs.append(read_csv_as_plainbytes(filep))
+    print(docs)
     print(decoded)
     # TODO: correct this all
     chat = YALSTMChatModel(vocab_size=vocab_size)
