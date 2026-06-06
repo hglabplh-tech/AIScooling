@@ -2,29 +2,32 @@ import os
 from pathlib import Path
 from typing import Mapping, Any, Optional
 
+#######################################################################
+## Yet another chat and LLM model
+## (c) 2026 Harald Glab-Plhak
+## email: hglabplhak@gmail.com
+## MIT License
+#######################################################################
+
 import torch.nn as nn
 import torch
 import json
 import re
-import pypdf
-import pdf2image
 from collections import Counter
 from datasets import load_dataset
-from h5py.h5pl import append
 from torch import Tensor
 from torch.utils.data import Dataset, DataLoader, TensorDataset, random_split
 from tqdm import tqdm
-from transformers.models.fsmt.modeling_fsmt import invert_mask
 
 from RAG_ASAG.utilities.RAGUtils import get_model_path, get_chat_model_basepath
 from transformers import PretrainedConfig
-from RAG_ASAG.utilities.RAGUtils import extract_doc_from_pdf, extract_doc_from_text, read_all_docs
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, unpack_sequence
+from RAG_ASAG.utilities.RAGUtils import extract_doc_from_pdf
+from torch.nn.utils.rnn import pack_padded_sequence
 
 #Some constant values
 LR     = 2e-5
 BATCH_SIZE = 32
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu") # select the device
 
 class YALLSTMModel(nn.Module):
     def __init__(self,

@@ -1,25 +1,28 @@
+
+#######################################################################
+## Useful Utilities for search / vector database creation update ....
+## (c) 2026 Harald Glab-Plhak
+## email: hglabplhak@gmail.com
+## MIT License
+#######################################################################
+
 import os
 import time
 import bs4
 import datetime
 from pathlib import Path
 from pandas import read_csv
-from pandas import DataFrame, read_csv
-from langchain_community.vectorstores import SKLearnVectorStore, Chroma
+from langchain_community.vectorstores import Chroma
 from langchain_community.document_loaders import PyPDFLoader, UnstructuredHTMLLoader, WebBaseLoader, TextLoader, \
     UnstructuredMarkdownLoader, UnstructuredWordDocumentLoader
-from langchain_community.document_loaders.parsers import RapidOCRBlobParser
-from langchain_text_splitters import CharacterTextSplitter, RecursiveCharacterTextSplitter
-from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.embeddings.fake import DeterministicFakeEmbedding
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_openai import OpenAIEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import JsonOutputParser
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_ollama import OllamaEmbeddings
 from langchain_classic.chains import LLMChain, SimpleSequentialChain
 from langchain_classic.chains import RetrievalQA
-from langchain_core.output_parsers import StrOutputParser
 from RAG_ASAG.utilities.HuggingChat import HuggingChat
 import pandas as pd
 
