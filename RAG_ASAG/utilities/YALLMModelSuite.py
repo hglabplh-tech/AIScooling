@@ -10,11 +10,13 @@ import pypdf
 import pdf2image
 from collections import Counter
 from datasets import load_dataset
+from h5py.h5pl import append
 from torch import Tensor
 from torch.utils.data import Dataset, DataLoader, TensorDataset, random_split
+from tqdm import tqdm
 from transformers.models.fsmt.modeling_fsmt import invert_mask
 
-from RAG_ASAG.utilities.RAGUtils import get_model_path, extract_csv_data
+from RAG_ASAG.utilities.RAGUtils import get_model_path, get_chat_model_basepath
 from transformers import PretrainedConfig
 from RAG_ASAG.utilities.RAGUtils import extract_doc_from_pdf, extract_doc_from_text, read_all_docs
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, unpack_sequence
@@ -207,8 +209,9 @@ class YALLSTMModel(nn.Module):
 
         model.train()
         for epoch in range(epochs):
+            loop = tqdm(loader, total=len(train_loader), leave=True)
             total_loss = 0.0
-            for batch_text, batch_mask, labels in train_loader:
+            for batch_text, batch_mask, labels in loop:
                 batch_text, batch_mask, labels = batch_text.to(DEVICE), batch_mask.to(DEVICE), labels.to(DEVICE)
 
                 optimizer.zero_grad()
@@ -218,6 +221,8 @@ class YALLSTMModel(nn.Module):
                 optimizer.step()
 
                 total_loss += loss.item() * batch_text.size(0)
+                loop.set_description(f"Epoch [{epoch + 1}/{epochs}]")
+                loop.set_postfix(loss=loss.item())
 
             print(f"Epoch {epoch + 1} | Loss: {total_loss / len(dataset):.4f}")
 
@@ -501,13 +506,13 @@ class YALSTMChatModel(nn.Module):
         return logits
 
     @classmethod
-    def train_model(cls, tokenizer, dataset, epochs=300):
+    def train_model(cls, tokenizer, dataset, chat_model_path, epochs=300):
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
         loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
 
-        model = YALSTMChatModel(vocab_size=len(vocab)).to(device)
+        model = YALSTMChatModel(vocab_size=len(tokenizer.vocab)).to(device)
 
         optimizer = torch.optim.Adam(model.parameters(), lr=LR)
         loss_fn = nn.CrossEntropyLoss()
@@ -516,8 +521,8 @@ class YALSTMChatModel(nn.Module):
             total_loss = 0.0
 
             model.train()
-
-            for batch in loader:
+            loop = tqdm(loader, total=len(loader), leave=True)
+            for batch in loop:
                 input_ids = batch["input_ids"].to(device)
                 attention_mask = batch["attention_mask"].to(device)
                 target = batch["target"].to(device)
@@ -531,11 +536,15 @@ class YALSTMChatModel(nn.Module):
                 optimizer.step()
 
                 total_loss += loss.item()
+                # Update the progress bar with metrics
+                loop.set_description(f"Epoch [{epoch + 1}/{epochs}]")
+                loop.set_postfix(loss=loss.item())
 
-            if epoch % 25 == 0:
-                print(f"Epoch {epoch} | Loss: {total_loss / len(loader):.4f}")
+           #if epoch % 25 == 0:
+            print(f"Epoch {epoch} | Loss: {total_loss / len(loader):.4f}")
 
-        torch.save(model.state_dict(), "autoregressive_lstm.pt")
+        model.save_model(chat_model_path)
+
 
         print("Gespeichert: autoregressive_lstm.pt")
         print("Gespeichert: vocab.json")
@@ -576,13 +585,26 @@ class YALSTMChatModel(nn.Module):
 
         return tokenizer.decode(ids)
 
+    def save_state_dict(self, pkl_path):
+        torch.save(self.state_dict(), pkl_path)
+
+    def save_model(self, model_path):
+       # self.save_model_conf(model_base_path, num_classes=1)
+        torch.save(self, model_path)
+
+    @classmethod
+    def load_model(cls, model_path):
+        return torch.load(model_path, map_location="cpu", weights_only=False)
+
+
+
 class YAAutoregressiveDataset(Dataset):
     def __init__(self, texts, tokenizer, seq_len=12):
         self.samples = []
-        self.pad_id = tokenizer.pad_id
+        self.pad_id = tokenizer.vocab[tokenizer.pad_token]
 
         for text in texts:
-            ids = tokenizer.encode(text)
+            ids = tokenizer.encode(text, return_tensors="none")
 
             for i in range(1, len(ids)):
                 context = ids[max(0, i - seq_len):i]
@@ -670,6 +692,17 @@ def load_create_model(base_model_path, pt_model_path, vocab_size=7000):
         print("Model instance created")
     return model
 
+def load_create_chat_model(pt_model_path, vocab_size=7000):
+    if (os.path.exists(pt_model_path)):
+        model = YALSTMChatModel.load_model(model_path=pt_model_path)
+        #model.inject_vocab_size(vocab_size)
+        print(f"Model loaded from: {pt_model_path}")
+    else:
+        model = YALSTMChatModel(vocab_size=vocab_size)
+        model.save_model(pt_model_path)
+        print("Model instance created")
+    return model
+
 
 
 def read_csv_as_plaintext(csv_file):
@@ -712,19 +745,20 @@ def prepare_for_ds(input_ids, attention_mask, label_tensor):
     tokenized_ds = TensorDataset(ids_tensor, attn_tensor, label_tensor)
     return tokenized_ds
 
-DEBUG = True
+DEBUG = False
 def debug_print(message):
     if DEBUG:
         print(message)
 
 
 def get_model_paths(model_postfix, base_model_path):
+    chat_model_path = get_chat_model_basepath()
     pt_model_name = f"YALSTMModel_{model_postfix}.pt"
     chat_model_name = f"YALSTMModel_{model_postfix}_chat.pt"
     dictionary_name = f"YALSTMDictionary_{model_postfix}.pt"
     tok_save_model_name = f"YALSTMTokenizer_{model_postfix}.json"
     pt_model_path = os.path.join(base_model_path, pt_model_name)
-    chat_model_path = os.path.join(base_model_path, chat_model_name)
+    chat_model_path = os.path.join(chat_model_path, chat_model_name)
     dictionary_path = os.path.join(base_model_path, dictionary_name)
     tok_save_path = os.path.join(base_model_path, tok_save_model_name)
     lang_words_path = os.path.join(base_model_path, 'vocab_input', 'lang_words.csv')
@@ -790,8 +824,13 @@ if __name__ == '__main__':
                    vocabs_lists[4] + vocabs_lists[5] + vocabs_lists[6])
     complete_text = " ".join(vocab_data).lower()
 
+    build_vocab = input("build vocab loaded new")
+    if (build_vocab == "y"):
+        vocab_size = tokenizer.build_vocab(vocab_data, append=False)
+    else:
+       # vocab_size = tokenizer.build_vocab(vocab_data, append=True)
+        vocab_size = len(tokenizer.vocab)
 
-    vocab_size = tokenizer.build_vocab(vocab_data)
     model = load_create_model(base_model_path, pt_model_path, vocab_size=vocab_size)
 
     dataset = YATextDataset(raw_data, tokenizer)
@@ -820,14 +859,16 @@ if __name__ == '__main__':
         tokenizer.to_json(file_path=tok_save_path)
     encoded = tokenizer("hello world here I am walking like a hurricane with ice in my eyes".lower())
     decoded = tokenizer.decode(encoded["input_ids"])
+    print(decoded)
     base = os.path.join(Path.home(), 'collections', 'chat_dialog')
     docs = []
     for file in os.listdir(base):
         filep = os.path.join(base, file)
         docs.append(read_csv_as_plainbytes(filep))
-    print(docs)
-    print(decoded)
+    #print(docs)
+    chat_dataset  = YAAutoregressiveDataset(docs, tokenizer)
     # TODO: correct this all
-    chat = YALSTMChatModel(vocab_size=vocab_size)
+    chat = load_create_chat_model(chat_model_path)
+    chat.train_model(tokenizer, chat_dataset, chat_model_path=chat_model_path, epochs=30)
     result = YALSTMChatModel.generate(chat, tokenizer, "Who was Winston Churchill ?", max_new_tokens=40)
     print(result)

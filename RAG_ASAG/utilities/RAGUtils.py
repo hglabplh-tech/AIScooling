@@ -5,7 +5,7 @@ import datetime
 from pathlib import Path
 from pandas import read_csv
 from pandas import DataFrame, read_csv
-from langchain_community.vectorstores import SKLearnVectorStore
+from langchain_community.vectorstores import SKLearnVectorStore, Chroma
 from langchain_community.document_loaders import PyPDFLoader, UnstructuredHTMLLoader, WebBaseLoader, TextLoader, \
     UnstructuredMarkdownLoader, UnstructuredWordDocumentLoader
 from langchain_community.document_loaders.parsers import RapidOCRBlobParser
@@ -24,6 +24,9 @@ from RAG_ASAG.utilities.HuggingChat import HuggingChat
 import pandas as pd
 
 CSIZE_CONST = 1024
+# Define the maximum batch size for ChromaDB add / create
+BATCH_SIZE = 5461
+
 
 
 def extract_doc_from_web_html(url):
@@ -212,9 +215,16 @@ def build_vectors(complete_content, db_path, parent):
     print(f"The first element is : {complete_content[0]}")
     chunks = splitter.split_documents(complete_content)
     print(f"Split pages post into {len(chunks)} sub-documents.")
-    vector_db = SKLearnVectorStore.from_documents(chunks, embedding=embeddings,
-                                                  persist_path=db_path,
-                                                  serializer="parquet")
+    vector_db = None
+    for i in range(0, len(chunks), BATCH_SIZE):
+        documents = chunks[i:i + BATCH_SIZE]
+        if not vector_db:
+            vector_db = Chroma.from_documents(documents, embedding=embeddings, persist_directory=db_path)
+        else:
+            vector_db.add_documents(documents=documents, embedding=embeddings)
+    #vector_db = SKLearnVectorStore.from_documents(chunks, embedding=embeddings,
+    #                                              persist_path=db_path,
+    #                                              serializer="parquet")
     vector_db.persist()
     return vector_db
 
@@ -222,9 +232,8 @@ def build_vectors(complete_content, db_path, parent):
 def add_documents(complete_content, db_path, parent):
     embeddings = get_embedding('huggingface', parent)
     chunk_size, chunk_overlap = CHUNK_SIZE()
-    vector_db = SKLearnVectorStore(embedding=embeddings,
-                                   persist_path=db_path,
-                                   serializer="parquet")
+    vector_db = Chroma(embedding_function=embeddings,
+                    persist_directory=db_path)
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap
@@ -235,8 +244,9 @@ def add_documents(complete_content, db_path, parent):
     chunks = splitter.split_documents(complete_content)
     print(f"Split documents into {len(chunks)} sub-documents.")
     print(f"build vector with chunk-size: {chunk_size} and chunk-overlap: {chunk_overlap}")
-
-    vector_db.add_documents(documents=chunks, embedding=embeddings)
+    for i in range(0, len(chunks), BATCH_SIZE):
+        documents = chunks[i:i + BATCH_SIZE]
+        vector_db.add_documents(documents=documents, embedding=embeddings)
     vector_db.persist()
     return vector_db
 
@@ -254,6 +264,13 @@ def  get_model_path():
         os.makedirs(base_model_path)
     absolute_model_path = os.path.join(base_model_path, "sklearn_trained_model.pt")
     return absolute_model_path, base_model_path
+
+
+def  get_chat_model_basepath():
+    base_model_path = os.path.join(get_db_base_path(), "ya_chat_model")
+    if not os.path.exists(base_model_path):
+        os.makedirs(base_model_path)
+    return base_model_path
 
 def get_rag_config_path():
     home = Path.home()
@@ -317,9 +334,8 @@ def get_vector_db(db_path, parent):
     #embeddings = DeterministicFakeEmbedding(size=4096)
     #embeddings = DeterministicFakeEmbedding(size=1024)
     #embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-    vector_db = SKLearnVectorStore(embedding=embeddings,
-                                   persist_path=db_path,
-                                   serializer="parquet")
+    vector_db = Chroma(embedding_function=embeddings,
+                                   persist_directory=db_path)
     return vector_db
 
 
