@@ -1,4 +1,9 @@
-from configparser import ConfigParser
+#######################################################################
+## prototyped examination correction tool
+## (c) 2026 Harald Glab-Plhak
+## email: hglabplhak@gmail.com
+## MIT License
+#######################################################################
 import os
 from pathlib import Path
 

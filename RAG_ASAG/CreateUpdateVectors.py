@@ -1,28 +1,14 @@
-# %% [markdown]
-# 
-# %%
-import kagglehub
+
+#######################################################################
+## vector database import tool
+## (c) 2026 Harald Glab-Plhak
+## email: hglabplhak@gmail.com
+## MIT License
+#######################################################################
 import os
-import uuid
-import bs4
 
 from pathlib import Path
-
-from lxml.etree import DocumentInvalid
-from numpy.f2py.auxfuncs import throw_error
-from oauthlib.oauth2.rfc6749.endpoints import metadata
-from pypdf import PdfReader
-from langchain_chroma import Chroma
-from langchain_community.vectorstores import SKLearnVectorStore
-from langchain_community.document_loaders import PyPDFLoader, UnstructuredHTMLLoader, WebBaseLoader, TextLoader, UnstructuredMarkdownLoader, UnstructuredWordDocumentLoader
-from langchain_community.document_loaders.parsers import RapidOCRBlobParser
-from langchain_text_splitters import CharacterTextSplitter, RecursiveCharacterTextSplitter
-from langchain_core.documents import Document
-from langchain_core.embeddings.fake import DeterministicFakeEmbedding
-from langchain_openai import OpenAIEmbeddings
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_ollama import OllamaEmbeddings
-
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from utilities.RAGUtils import build_vectors, get_db_lit_path, get_db_inf_path, get_db_history_path, actual_time
 from utilities.RAGUtils import CHUNK_SIZE, add_documents, read_all_docs, get_db_base_path, get_embedding

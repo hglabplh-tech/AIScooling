@@ -1,6 +1,10 @@
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import JsonOutputParser
+#######################################################################
+## A little researcher
+## (c) 2026 Harald Glab-Plhak
+## email: hglabplhak@gmail.com
+## MIT License
+#######################################################################
+
 from utilities.RAGUtils import query_execute, generate_follow_ups, load_vector_db, printout_results
 
 

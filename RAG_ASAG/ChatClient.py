@@ -1,17 +1,18 @@
+#######################################################################
+## chat  tool
+## (c) 2026 Harald Glab-Plhak
+## email: hglabplhak@gmail.com
+## MIT License
+#######################################################################
 import os
-from langchain.tools import tool
-from langchain.chat_models import init_chat_model
+
 
 from langchain_classic.chains import LLMChain, SimpleSequentialChain
 from langchain_classic.chains import RetrievalQA
-from langchain_core.output_parsers import StrOutputParser
 from langchain_classic.chains import create_retrieval_chain, example_generator
 from utilities.RAGUtils import get_rag_config_path
 from utilities.RAGUtils import load_vector_db, printout_results, query_execute, get_app_key, get_model_path
-from  RAG_ASAG.TrainBertModel import load_model_and_train,  save_model, BERT, BertPositionalEmbedding, MultiHeadedAttention
-from  RAG_ASAG.TrainBertModel import TransformerEncoderLayer,MLMHead, MLMDataset, AdamW,Dataset, DataLoader, Pooler, BertWordPieceTokenizer
-from tokenizers import BertWordPieceTokenizer
-
+from  RAG_ASAG.TrainBertModel import load_model_and_train,  save_model
 
 def set_api_env_and_keys(mode):
     app_key = get_app_key()

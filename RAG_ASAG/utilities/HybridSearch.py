@@ -1,13 +1,15 @@
-import os
-import pypdf
-import  random
+#######################################################################
+##Hybrid search utility including Thesaurus
+## (c) 2026 Harald Glab-Plhak
+## email: hglabplhak@gmail.com
+## MIT License
+#######################################################################
 
-from langchain_core.documents import Document
+import pypdf
+
 from rank_bm25 import BM25Plus
-#from langchain_community.retrievers import  BM25Retriever
 from sentence_transformers import SentenceTransformer
 import numpy as np
-from RAG_ASAG.utilities.BM25PlusDerived import BM25PlusDerived
 from RAG_ASAG.utilities.RAGUtils import set_api_env_and_keys_in_parent
 from  RAG_ASAG.utilities.FullTextSearch import get_collections_path, get_pdf_files, extract_keywords,sort_by_score,print_results,get_key_strict
 
