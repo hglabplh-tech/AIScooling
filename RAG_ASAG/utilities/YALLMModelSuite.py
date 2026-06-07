@@ -579,6 +579,7 @@ class YALSTMChatModel(nn.Module):
         with torch.no_grad():
             for _ in range(max_new_tokens):
                 context = ids[-seq_len:]#TODO: SEQ_LEN
+                debug_print(f"Gen Context: {context}")
 
                 while len(context) < seq_len: #TODO: SEQ_LEN
                     context.insert(0,  tokenizer.vocab[tokenizer.pad_token])
@@ -592,14 +593,19 @@ class YALSTMChatModel(nn.Module):
                 logits = logits / temperature
 
                 probs = torch.softmax(logits, dim=-1)
+                debug_print(f"Probs: {probs}")
                 next_id = torch.multinomial(probs, num_samples=1).item()
-
+                debug_print(f"Next_id:{next_id}")
                 ids.append(next_id)
 
                 if next_id ==  tokenizer.vocab[tokenizer.eos_token]:
                     break
 
-        return tokenizer.decode(ids)
+        debug_print("Done")
+        debug_print(f"ids: {ids}")
+        result = tokenizer.decode(ids)
+        debug_print(f"result: {result}")
+        return result
 
     def save_state_dict(self, pkl_path):
         torch.save(self.state_dict(), pkl_path)
@@ -761,7 +767,7 @@ def prepare_for_ds(input_ids, attention_mask, label_tensor):
     tokenized_ds = TensorDataset(ids_tensor, attn_tensor, label_tensor)
     return tokenized_ds
 
-DEBUG = False
+DEBUG = True
 def debug_print(message):
     if DEBUG:
         print(message)
