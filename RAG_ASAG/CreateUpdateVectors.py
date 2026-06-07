@@ -57,16 +57,16 @@ def processInputAndImport(data_rel_path, db_path):
     first = True
     data_path = os.path.join(Path.home(), 'collections', data_rel_path)
     filenames = os.listdir(data_path)
-
+    vector_db = None
     for filename in filenames:
         ret_code, complete_content = read_all_docs(data_path, filename)
         if first:
             print("build vector-db")
-            build_vectors(complete_content, db_path, False)
+            vector_db = build_vectors(complete_content, db_path, False)
             first = False
         else:
             print("add to vector-db")
-            add_documents(complete_content, db_path, False)
+            vector_db = add_documents(complete_content, db_path, False)
     return vector_db
 
 if __name__ == '__main__':

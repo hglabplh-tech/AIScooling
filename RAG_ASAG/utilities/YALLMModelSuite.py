@@ -1,7 +1,3 @@
-import os
-from pathlib import Path
-from typing import Mapping, Any, Optional
-
 #######################################################################
 ## Yet another chat and LLM model
 ## (c) 2026 Harald Glab-Plhak
@@ -9,6 +5,11 @@ from typing import Mapping, Any, Optional
 ## MIT License
 #######################################################################
 
+##
+# The Imports
+##
+import os
+from pathlib import Path
 import torch.nn as nn
 import torch
 import json
@@ -24,10 +25,18 @@ from transformers import PretrainedConfig
 from RAG_ASAG.utilities.RAGUtils import extract_doc_from_pdf
 from torch.nn.utils.rnn import pack_padded_sequence
 
-#Some constant values
+##
+# Some constant values
+##
+
 LR     = 2e-5
 BATCH_SIZE = 32
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu") # select the device
+
+
+##
+# A simple LSTM model for LLM processing
+##
 
 class YALLSTMModel(nn.Module):
     def __init__(self,
@@ -52,7 +61,11 @@ class YALLSTMModel(nn.Module):
         self.hidden_dim = hidden_dim
         self.layer_dim = layer_dim
         self.num_classes = num_classes
+        # The embedding for te model
+        #
         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=padding_idx)
+        # The linear function is for getting the final logits in the forward
+        #
         self.fc = nn.Linear(hidden_dim, num_classes)
         self.embed_dim = embed_dim
         self.vocab_size = vocab_size
@@ -62,6 +75,7 @@ class YALLSTMModel(nn.Module):
 
         # Fully connected layer to convert hidden state to final output
         self.softmax = softmax
+        # for further use
         self.log_softmax = nn.LogSoftmax(dim=1)
 
     def inject_vocab_size(self, vocab_size):
@@ -72,6 +86,7 @@ class YALLSTMModel(nn.Module):
     def get_vocab_size(self):
          return self.vocab_size
 
+    # function to split the training test and evaluate data
     @classmethod
     def split_data(cls, dataset, train_part_size=0.8, val_part_size=0.1, test_part_size=0.1):
         total = len(dataset)
@@ -92,12 +107,10 @@ class YALLSTMModel(nn.Module):
         )
         return train_ds, val_ds, test_ds
 
-    # ==========================================
-    # 4. RE-CONFIGURED TRAINING LOOP
-    # ==========================================
 
-
-
+    ##
+    # The forward function is called during training or getting results from the model
+    ##
     def forward(self, text_tensors, attention_mask):
         # 1. Sum up attention mask horizontally to find true length of each sequence
         lengths = attention_mask.sum().cpu()
@@ -170,6 +183,7 @@ class YALLSTMModel(nn.Module):
         debug_print(list_tensor)
         return list_tensor
 
+
     @classmethod
     def prepare_data_for_train(cls,  pt_model_path,  dataset):
         train_ds, val_ds, test_ds = cls.split_data(dataset, train_part_size=0.7, val_part_size=0.1, test_part_size=0.2)
@@ -212,7 +226,7 @@ class YALLSTMModel(nn.Module):
 
         model.train()
         for epoch in range(epochs):
-            loop = tqdm(loader, total=len(train_loader), leave=True)
+            loop = tqdm(train_loader, total=len(train_loader), leave=True)
             total_loss = 0.0
             for batch_text, batch_mask, labels in loop:
                 batch_text, batch_mask, labels = batch_text.to(DEVICE), batch_mask.to(DEVICE), labels.to(DEVICE)
@@ -549,8 +563,7 @@ class YALSTMChatModel(nn.Module):
         model.save_model(chat_model_path)
 
 
-        print("Gespeichert: autoregressive_lstm.pt")
-        print("Gespeichert: vocab.json")
+        print(f"Stored: {chat_model_path}")
 
     @classmethod
     def generate(cls, model, tokenizer, prompt, max_new_tokens=30, temperature=0.8, seq_len=12):
@@ -827,7 +840,7 @@ if __name__ == '__main__':
                    vocabs_lists[4] + vocabs_lists[5] + vocabs_lists[6])
     complete_text = " ".join(vocab_data).lower()
 
-    build_vocab = input("build vocab loaded new")
+    build_vocab = input("Build vocab loaded new: ")
     if (build_vocab == "y"):
         vocab_size = tokenizer.build_vocab(vocab_data, append=False)
     else:
@@ -872,6 +885,8 @@ if __name__ == '__main__':
     chat_dataset  = YAAutoregressiveDataset(docs, tokenizer)
     # TODO: correct this all
     chat = load_create_chat_model(chat_model_path)
-    chat.train_model(tokenizer, chat_dataset, chat_model_path=chat_model_path, epochs=30)
+    trainit = input('Train the chat model y/n: ')
+    if trainit == 'y':
+        chat.train_model(tokenizer, chat_dataset, chat_model_path=chat_model_path, epochs=30)
     result = YALSTMChatModel.generate(chat, tokenizer, "Who was Winston Churchill ?", max_new_tokens=40)
     print(result)

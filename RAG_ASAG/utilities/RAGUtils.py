@@ -6,6 +6,8 @@
 ## MIT License
 #######################################################################
 
+## Will be rewritten later on as class
+
 import os
 import time
 import bs4
@@ -26,12 +28,15 @@ from langchain_classic.chains import RetrievalQA
 from RAG_ASAG.utilities.HuggingChat import HuggingChat
 import pandas as pd
 
+# chunk size constant for vector database import
 CSIZE_CONST = 1024
 # Define the maximum batch size for ChromaDB add / create
 BATCH_SIZE = 5461
 
 
-
+##
+# extract a document from html
+##
 def extract_doc_from_web_html(url):
     # Only keep post title, headers, and content from the full HTML.
     bs4_strainer = bs4.SoupStrainer(class_=("post-title", "post-header", "post-content"))
