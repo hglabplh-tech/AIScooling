@@ -298,25 +298,31 @@ class YATokenizer:
 
     def build_vocab(self, corpus, append=False):
         # Flatten all text and count word frequencies
+
         words = " ".join(corpus).split()
         counts = Counter(words)
         unique_words = self.special_tokens + sorted(list(counts.keys()))
+        debug_print(f'vocab len old is: {len(unique_words)}')
         if append:
             all_ids = list(self.vocab.values())
             next_id = max(all_ids) + 1 if all_ids else 0
-
+            debug_print(f'vocab next is: {next_id}')
             new_tokens = []
 
-            for token, _ in self.vocab.items():
+            for token, _ in counts.items():
                 if token not in self.vocab:
-                    self.vocab[token] = counts.get(token)
+                    debug_print(f'token: {token} not in vocab')
+                    self.vocab[token] = next_id
                     new_tokens.append(token)
                     next_id += 1
+            self.id_to_word = {i: word for word, i in self.vocab.items()}
         else:
             # Add special tokens first, then unique words
             self.vocab = {word: i for i, word in enumerate(unique_words)}
             self.id_to_word = {i: word for word, i in self.vocab.items()}
-        return len(self.vocab)
+        len_vocabs =  len(self.vocab)
+        debug_print(f'vocab new len is: {len_vocabs}')
+        return len_vocabs
 
     # Assuming 'tokenizer' is the object from the previous example
     def to_json(self, file_path):
@@ -862,8 +868,8 @@ if __name__ == '__main__':
     if (build_vocab == "y"):
         vocab_size = tokenizer.build_vocab(vocab_data, append=False)
     else:
-       # vocab_size = tokenizer.build_vocab(vocab_data, append=True)
-        vocab_size = len(tokenizer.vocab)
+        vocab_size = tokenizer.build_vocab(vocab_data, append=True)
+        #vocab_size = len(tokenizer.vocab)
 
     model = load_create_model(base_model_path, pt_model_path, vocab_size=vocab_size)
 
