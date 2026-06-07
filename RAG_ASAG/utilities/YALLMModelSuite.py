@@ -283,10 +283,6 @@ class  YALLSTMModelConfig(PretrainedConfig):
 class YATokenizer:
     def __init__(self,  vocab=None,
                  max_length=10,
-                 pad_token="<PAD>",
-                 unk_token="<UNK>",
-                 eos_token="<EOS>",
-                 bos_token="<BOS>",
                  special_tokens = ["<PAD>", "<UNK>","<EOS>", "<BOS>"]):
         self.max_length = max_length
         self.vocab = vocab
@@ -337,17 +333,28 @@ class YATokenizer:
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         instance = cls(vocab=data["vocab"], special_tokens=data["special_tokens"])
+        instance.id_to_word = {i: word for word, i in instance.vocab.items()}
         print('Tokenizer created from {}'.format(file_path))
         return instance
 
     def encode(self, text, return_tensors="pt"):
+        text = self.clean_and_tokenize(text)
         unk_id = self.vocab.get(self.unk_token)
-        ids = [self.vocab.get(word, unk_id) for word in text.split()]
+        bos_id = self.vocab.get(self.bos_token)
+        eos_id = self.vocab.get(self.bos_token)
+        ids = [bos_id]
+        ids += [self.vocab.get(t, unk_id) for t in text]
+        ids.append(eos_id)
         if return_tensors == "pt":
             # Returns a 1D tensor: [seq_len]
             return torch.tensor(ids, dtype=torch.long)
         return ids
 
+    #def encode(self, text):
+     #   ids = [self.bos_id]
+     #   ids += [self.vocab.get(t, self.unk_id) for t in text.lower().split()]
+      #  ids.append(self.eos_id)
+      #  return ids
     def batch_encode(self, texts, max_len=10):
         batch_ids = []
         pad_id = self.vocab.get(self.pad_token, 0)
@@ -378,11 +385,15 @@ class YATokenizer:
                 if skip_special_tokens and word in self.special_tokens:
                     continue
                 words.append(word)
+            debug_print(f"words: {words} ")
             return " ".join(words)
 
         # Handle Batch or Single
         if isinstance(token_ids[0], int):
+            debug_print("return if int")
+            debug_print(token_ids)
             return clean(token_ids)
+        debug_print("return if str")
         return [clean(seq) for seq in token_ids]
 
     def clean_and_tokenize(self, text):
@@ -571,10 +582,11 @@ class YALSTMChatModel(nn.Module):
 
         model.eval()
 
-        encoded = tokenizer(prompt)
-        ids = encoded["input_ids"]
-        debug_print(f"ids: {ids}")
+        ids = tokenizer.encode(prompt, return_tensors="str")
+        #ids = encoded["input_ids"]
+
         ids = ids[:-1]
+        debug_print(f"ids: {ids}")
 
         with torch.no_grad():
             for _ in range(max_new_tokens):
@@ -895,4 +907,5 @@ if __name__ == '__main__':
     if trainit == 'y':
         chat.train_model(tokenizer, chat_dataset, chat_model_path=chat_model_path, epochs=30)
     result = YALSTMChatModel.generate(chat, tokenizer, "Who was Winston Churchill ?", max_new_tokens=40)
+    print(len(result))
     print(result)
