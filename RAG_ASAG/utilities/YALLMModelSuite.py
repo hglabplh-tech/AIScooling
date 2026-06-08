@@ -344,7 +344,7 @@ class YATokenizer:
         return instance
 
     def encode(self, text, return_tensors="pt"):
-        text = self.clean_and_tokenize(text)
+       # text = self.clean_and_tokenize(text)
         unk_id = self.vocab.get(self.unk_token)
         bos_id = self.vocab.get(self.bos_token)
         eos_id = self.vocab.get(self.bos_token)
@@ -588,8 +588,8 @@ class YALSTMChatModel(nn.Module):
 
         model.eval()
 
-        ids = tokenizer.encode(prompt, return_tensors="str")
-        #ids = encoded["input_ids"]
+        encoded = tokenizer(prompt) #, return_tensors="str")
+        ids = encoded["input_ids"]
 
         ids = ids[:-1]
         debug_print(f"ids: {ids}")
