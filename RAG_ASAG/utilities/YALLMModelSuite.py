@@ -864,11 +864,14 @@ if __name__ == '__main__':
                    vocabs_lists[4] + vocabs_lists[5] + vocabs_lists[6])
     complete_text = " ".join(vocab_data).lower()
 
-    build_vocab = input("Build vocab loaded new: ")
-    if (build_vocab == "y"):
-        vocab_size = tokenizer.build_vocab(vocab_data, append=False)
-    else:
+   # build_vocab = input("Build vocab loaded new: ")
+    #if (build_vocab == "y"):
+    if os.path.exists(tok_save_path):
+        debug_print(f"update vocabs of {tok_save_path}")
         vocab_size = tokenizer.build_vocab(vocab_data, append=True)
+    else:
+        debug_print(f"initial create vocabs of {tok_save_path}")
+        vocab_size = tokenizer.build_vocab(vocab_data, append=False)
         #vocab_size = len(tokenizer.vocab)
 
     model = load_create_model(base_model_path, pt_model_path, vocab_size=vocab_size)
@@ -911,7 +914,7 @@ if __name__ == '__main__':
     chat = load_create_chat_model(chat_model_path)
     trainit = input('Train the chat model y/n: ')
     if trainit == 'y':
-        chat.train_model(tokenizer, chat_dataset, chat_model_path=chat_model_path, epochs=30)
+        chat.train_model(tokenizer, chat_dataset, chat_model_path=chat_model_path, epochs=5)
     result = YALSTMChatModel.generate(chat, tokenizer, "Who was Winston Churchill ?", max_new_tokens=40)
     print(len(result))
     print(result)
