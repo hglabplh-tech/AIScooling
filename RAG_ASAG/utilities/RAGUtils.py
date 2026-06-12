@@ -25,7 +25,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_ollama import OllamaEmbeddings
 from langchain_classic.chains import LLMChain, SimpleSequentialChain
 from langchain_classic.chains import RetrievalQA
-from RAG_ASAG.utilities.HuggingChat import HuggingChat
+from RAG_ASAG.utilities.HuggingChat import generate_answer
 import pandas as pd
 
 # chunk size constant for vector database import
@@ -108,13 +108,13 @@ def analyze_CSV(csv_file_path, query,parent):
     else:
         set_api_env_and_keys()
 
-    client = HuggingChat()
+
 # Load CSV data
     df = pd.read_csv(csv_file_path)
     csv_string = df.to_string()
 
 # Send to OpenAI
-    response = client.execute_query("You are a data researcher.",
+    response = generate_answer("You are a data researcher." +
             "where criteria is   {query}  in this data\n{csv_string}" )
     return response.content
 
@@ -463,10 +463,9 @@ def get_keywords(query,parent):
         set_api_env_and_keys_in_parent()
     else:
         set_api_env_and_keys()
-    client = HuggingChat()
 
 # Send to OpenAI
-    response = client.execute_query("You are a keyword generator.",
+    response = generate_answer("You are a keyword generator." +
             f"create up to four keywords for the answer  {query}")
     return response.content
 
@@ -475,12 +474,9 @@ def get_query_keywords(query,parent):
         set_api_env_and_keys_in_parent()
     else:
         set_api_env_and_keys()
-    client = HuggingChat(dtype='cuda',
-                         device_map='auto',
-                         model_id= "openai/gpt-oss-20b")
 
 # Send to OpenAI
-    response = client.execute_query("You are a keyword generator.",
+    response = generate_answer("You are a keyword generator." +
                                     f"create up to five short keywords with only substantives no numbering for the query  {query}")
 
 
